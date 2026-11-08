@@ -92,7 +92,7 @@ export class CreateCurrentAffairDto {
       'Optional S3 object metadata from `POST /api/v1/files/upload` (JPEG/PNG). Persist `key`, `bucket`, and `region`. Do not store a long-lived public URL — reads return a short-lived `imageUrl`. Omit to create without an image.',
     example: {
       key: 'admin-images/1723654321-uuid.png',
-      bucket: 'ez-prep-assets',
+      bucket: 'examflex-assets',
       region: 'ap-south-1',
       contentType: 'image/png',
       size: 48291,

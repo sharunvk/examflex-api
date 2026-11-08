@@ -92,7 +92,7 @@ export class UpdateOperationsConfigDto {
 
 /** Optional Redis and import-queue overrides. Bounds match resolveRedisSettings. */
 export class UpdateRedisConfigDto {
-  @ApiPropertyOptional({ example: 'ezprep' })
+  @ApiPropertyOptional({ example: 'examflex' })
   @Transform(trimLowerString)
   @IsOptional()
   @IsString()
@@ -104,7 +104,7 @@ export class UpdateRedisConfigDto {
   })
   keyPrefix?: string;
 
-  @ApiPropertyOptional({ example: '{ezprep}:bull' })
+  @ApiPropertyOptional({ example: '{examflex}:bull' })
   @Transform(trimString)
   @IsOptional()
   @IsString()
@@ -112,7 +112,7 @@ export class UpdateRedisConfigDto {
   @MaxLength(128)
   @Matches(/\{[^{}]+\}/, {
     message:
-      'bullPrefix must include a non-empty Redis hash tag, for example {ezprep}:bull',
+      'bullPrefix must include a non-empty Redis hash tag, for example {examflex}:bull',
   })
   bullPrefix?: string;
 

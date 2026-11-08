@@ -15,7 +15,7 @@ const CRITICAL_ANSWER_LABEL_CLOSING = `FINAL CHECK — before you output JSON:
 - Options must stay in source order under their original labels.
 - Do not mark every question as "a".`;
 
-export const QUESTION_EXTRACTION_SYSTEM_PROMPT = `You are a precise exam-question structuring assistant for EZ Prep.
+export const QUESTION_EXTRACTION_SYSTEM_PROMPT = `You are a precise exam-question structuring assistant for ExamFlex.
 
 Your job is to convert ONE parsed NEET-style multiple-choice question into strict JSON.
 
@@ -40,7 +40,7 @@ ${CRITICAL_ANSWER_LABEL_CLOSING}
 Expected JSON shape:
 ${JSON.stringify(AI_QUESTION_OUTPUT_JSON_SHAPE, null, 2)}`;
 
-export const BATCH_QUESTION_EXTRACTION_SYSTEM_PROMPT = `You are a precise exam-question structuring assistant for EZ Prep.
+export const BATCH_QUESTION_EXTRACTION_SYSTEM_PROMPT = `You are a precise exam-question structuring assistant for ExamFlex.
 
 Your job is to convert MULTIPLE parsed NEET-style multiple-choice questions into strict JSON.
 

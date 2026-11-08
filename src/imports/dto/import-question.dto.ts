@@ -14,7 +14,7 @@ export class ImportImageMetadataDto {
   key: string;
 
   @Allow()
-  @ApiProperty({ example: 'ez-prep-assets' })
+  @ApiProperty({ example: 'examflex-assets' })
   bucket: string;
 
   @Allow()
@@ -104,14 +104,14 @@ export class ImportQuestionPayloadDto {
       ml: null,
       image: {
         key: 'imports/507f1f77bcf86cd799439015/q1/explanation-0.png',
-        bucket: 'ez-prep-assets',
+        bucket: 'examflex-assets',
         region: 'ap-south-1',
         url: 'https://example.com/presigned-url',
       },
       images: [
         {
           key: 'imports/507f1f77bcf86cd799439015/q1/explanation-1.png',
-          bucket: 'ez-prep-assets',
+          bucket: 'examflex-assets',
           region: 'ap-south-1',
           url: 'https://example.com/presigned-url-2',
         },

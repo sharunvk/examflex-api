@@ -245,7 +245,7 @@ export class UsersService {
 
   async createAdmin(dto: CreateAdminDto): Promise<UserResponseDto> {
     const username = dto.username.trim().toLowerCase();
-    const email = (dto.email || `${username}@admin.ezprep.local`)
+    const email = (dto.email || `${username}@admin.examflex.local`)
       .trim()
       .toLowerCase();
 
@@ -323,7 +323,7 @@ export class UsersService {
    * Email stays required+unique on the schema, so it is tombstoned rather than unset.
    */
   async softDelete(id: string): Promise<UserResponseDto> {
-    const tombstoneEmail = `deleted.${id}@deleted.ezprep.local`;
+    const tombstoneEmail = `deleted.${id}@deleted.examflex.local`;
     const deletedUser = await this.userModel
       .findByIdAndUpdate(
         id,

@@ -3,7 +3,7 @@ import { UserRole } from '../../common/enums/user-role.enum';
 export const sampleUsers = [
   {
     name: 'John Admin',
-    email: 'admin@ezprep.com',
+    email: 'admin@examflex.com',
     phoneNumber: '+1234567890',
     role: UserRole.ADMIN,
     isActive: true,
@@ -24,7 +24,7 @@ export const sampleUsers = [
   },
   {
     name: 'Alice Manager',
-    email: 'alice.manager@ezprep.com',
+    email: 'alice.manager@examflex.com',
     phoneNumber: '+1234567893',
     role: UserRole.ADMIN,
     isActive: true,

@@ -181,7 +181,7 @@ export class UploadQuestionPdfResponseDto {
 
   @ApiProperty({
     description: 'S3 bucket name',
-    example: 'ez-prep-question-uploads',
+    example: 'examflex-question-uploads',
   })
   s3Bucket: string;
 

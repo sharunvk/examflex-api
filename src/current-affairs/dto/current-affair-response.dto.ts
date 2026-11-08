@@ -56,7 +56,7 @@ export class CurrentAffairResponseDto {
     description:
       'Short-lived (≈1 hour) presigned GET URL for `image`. Prefer this for display. Refresh via `POST /api/v1/files/signed-url` if it expires.',
     example:
-      'https://ez-prep-assets.s3.ap-south-1.amazonaws.com/admin-images/file.png?X-Amz-Signature=...',
+      'https://examflex-assets.s3.ap-south-1.amazonaws.com/admin-images/file.png?X-Amz-Signature=...',
   })
   @Expose()
   imageUrl?: string;

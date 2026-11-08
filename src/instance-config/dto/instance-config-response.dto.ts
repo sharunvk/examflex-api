@@ -160,7 +160,7 @@ export class InstanceConfigResponseDto {
   })
   schemaVersion: number;
 
-  @ApiProperty({ example: 'EZ Prep' })
+  @ApiProperty({ example: 'ExamFlex' })
   name: string;
 
   @ApiPropertyOptional({

@@ -2,7 +2,7 @@ import { ForbiddenException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { parseCorsOrigins } from '../../common/config/security.config';
 
-export const REFRESH_COOKIE_NAME = 'ezprep_rt';
+export const REFRESH_COOKIE_NAME = 'examflex_rt';
 
 /** Cookie path limited to auth routes so it is not sent on every API call. */
 export const REFRESH_COOKIE_PATH = '/api/v1/auth';

@@ -173,11 +173,11 @@ describe('GoogleIdentityStrategy', () => {
     expect(displayNameFromGoogle(null, 'asha.nair@gmail.com')).toBe(
       'asha.nair',
     );
-    expect(displayNameFromGoogle(null, null)).toBe('EzPrep User');
+    expect(displayNameFromGoogle(null, null)).toBe('ExamFlex User');
     expect(displayNameFromGoogle('  ', 'asha.nair@gmail.com')).toBe(
       'asha.nair',
     );
-    expect(displayNameFromGoogle('', 'a@gmail.com')).toBe('EzPrep User');
+    expect(displayNameFromGoogle('', 'a@gmail.com')).toBe('ExamFlex User');
     expect(displayNameFromGoogle('  Asha   Nair  ')).toBe('Asha Nair');
     expect(safeHttpsAvatar('http://example.com/a.png')).toBeUndefined();
     expect(safeHttpsAvatar('not a url')).toBeUndefined();

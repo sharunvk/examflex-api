@@ -17,7 +17,7 @@ export function assertKeySegment(value: string, label: string): string {
 /**
  * Builds instance-scoped Redis keys. Callers pass logical parts only.
  * A later session or cache feature uses the same builder so keys cannot
- * collide across EZ Prep, ExamFlex, or any other deployment.
+ * collide across deployments that share one Redis database.
  */
 @Injectable()
 export class RedisKeyBuilder {

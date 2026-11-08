@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const instanceId = process.env.INSTANCE_ID || 'api';
+const instanceId = process.env.INSTANCE_ID || 'examflex';
 
 module.exports = {
   apps: [
@@ -24,8 +24,8 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 3000,
-        INSTANCE_ID: process.env.INSTANCE_ID || 'api',
-        INSTANCE_NAME: process.env.INSTANCE_NAME || 'API',
+        INSTANCE_ID: process.env.INSTANCE_ID || 'examflex',
+        INSTANCE_NAME: process.env.INSTANCE_NAME || 'ExamFlex',
       },
     },
   ],

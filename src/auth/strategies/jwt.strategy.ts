@@ -7,7 +7,7 @@ import type { Request } from 'express';
 import { AuthService, JwtPayload } from '../auth.service';
 import { UserResponseDto } from '../../users/dto/user-response.dto';
 
-export const JWT_PAYLOAD_REQUEST_KEY = 'ezprepJwtPayload';
+export const JWT_PAYLOAD_REQUEST_KEY = 'examflexJwtPayload';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {

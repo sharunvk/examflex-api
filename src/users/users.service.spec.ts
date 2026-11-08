@@ -280,7 +280,7 @@ describe('UsersService', () => {
       mockUserModel.create.mockResolvedValue(
         mockUserDocument({
           name: 'Admin',
-          email: 'admin@admin.ezprep.local',
+          email: 'admin@admin.examflex.local',
           username: 'admin',
           role: UserRole.ADMIN,
         }),
@@ -364,7 +364,7 @@ describe('UsersService', () => {
           mockUserDocument({
             isDeleted: true,
             isActive: false,
-            email: `deleted.${OID}@deleted.ezprep.local`,
+            email: `deleted.${OID}@deleted.examflex.local`,
           }),
         ),
       );
@@ -375,7 +375,7 @@ describe('UsersService', () => {
           $set: {
             isDeleted: true,
             isActive: false,
-            email: `deleted.${OID}@deleted.ezprep.local`,
+            email: `deleted.${OID}@deleted.examflex.local`,
           },
           $unset: {
             phoneNumber: 1,

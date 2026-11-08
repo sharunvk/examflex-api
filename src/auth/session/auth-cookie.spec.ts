@@ -14,7 +14,7 @@ describe('auth-cookie', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
-    process.env.CORS_ORIGINS = 'http://localhost:3001,https://www.ezprep.in';
+    process.env.CORS_ORIGINS = 'http://localhost:3001,https://www.examflex.in';
     process.env.NODE_ENV = 'test';
     delete process.env.AUTH_COOKIE_DOMAIN;
   });
@@ -24,7 +24,7 @@ describe('auth-cookie', () => {
   });
 
   describe('readRefreshCookie', () => {
-    it('reads ezprep_rt from the Cookie header', () => {
+    it('reads examflex_rt from the Cookie header', () => {
       const req = {
         headers: {
           cookie: `other=1; ${REFRESH_COOKIE_NAME}=opaque-refresh; x=y`,
@@ -56,25 +56,25 @@ describe('auth-cookie', () => {
     });
 
     it('applies AUTH_COOKIE_DOMAIN when set', () => {
-      process.env.AUTH_COOKIE_DOMAIN = '.ezprep.in';
+      process.env.AUTH_COOKIE_DOMAIN = '.examflex.in';
       const cookie = jest.fn();
       setRefreshCookie({ cookie } as unknown as Response, 'rt', 10);
       expect(cookie).toHaveBeenCalledWith(
         REFRESH_COOKIE_NAME,
         'rt',
-        expect.objectContaining({ domain: '.ezprep.in' }),
+        expect.objectContaining({ domain: '.examflex.in' }),
       );
     });
 
     it('clears with matching path/domain options', () => {
-      process.env.AUTH_COOKIE_DOMAIN = '.ezprep.in';
+      process.env.AUTH_COOKIE_DOMAIN = '.examflex.in';
       const clearCookie = jest.fn();
       clearRefreshCookie({ clearCookie } as unknown as Response);
       expect(clearCookie).toHaveBeenCalledWith(
         REFRESH_COOKIE_NAME,
         expect.objectContaining({
           path: REFRESH_COOKIE_PATH,
-          domain: '.ezprep.in',
+          domain: '.examflex.in',
           httpOnly: true,
         }),
       );
@@ -85,7 +85,7 @@ describe('auth-cookie', () => {
     it('allows an Origin in CORS_ORIGINS', () => {
       expect(() =>
         assertCookieRequestOrigin({
-          headers: { origin: 'https://www.ezprep.in' },
+          headers: { origin: 'https://www.examflex.in' },
         } as Request),
       ).not.toThrow();
     });

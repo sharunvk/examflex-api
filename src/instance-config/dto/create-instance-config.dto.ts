@@ -14,8 +14,8 @@ import {
 
 export class CreateInstanceConfigDto {
   @ApiProperty({
-    description: 'Display name for this deployment (for example, EZ Prep)',
-    example: 'EZ Prep',
+    description: 'Display name for this deployment (for example, ExamFlex)',
+    example: 'ExamFlex',
     minLength: 1,
     maxLength: 120,
   })

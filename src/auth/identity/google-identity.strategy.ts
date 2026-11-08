@@ -152,7 +152,7 @@ export function displayNameFromGoogle(
     return local;
   }
 
-  return 'EzPrep User';
+  return 'ExamFlex User';
 }
 
 export function safeHttpsAvatar(url?: string | null): string | undefined {

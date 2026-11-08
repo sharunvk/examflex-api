@@ -49,7 +49,7 @@ export class StudentAccountResolver {
     }
 
     const tempName = `User ${phoneNumber.slice(-4)}`;
-    const tempEmail = `user${phoneNumber.replace(/\D/g, '')}@temp.ezprep.com`;
+    const tempEmail = `user${phoneNumber.replace(/\D/g, '')}@temp.examflex.com`;
     const createUserDto: CreateUserDto = {
       name: tempName,
       email: tempEmail,
@@ -89,7 +89,7 @@ export class StudentAccountResolver {
 
     try {
       const user = await this.usersService.createGoogleUser({
-        name: identity.name || 'EzPrep User',
+        name: identity.name || 'ExamFlex User',
         email,
         googleSub,
         avatarUrl: identity.avatarUrl,

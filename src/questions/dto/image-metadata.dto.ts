@@ -6,7 +6,7 @@ export class ImageMetadataDto {
   @IsString()
   key: string;
 
-  @ApiProperty({ example: 'ez-prep-assets' })
+  @ApiProperty({ example: 'examflex-assets' })
   @IsString()
   bucket: string;
 

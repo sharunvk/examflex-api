@@ -18,7 +18,7 @@ export class ExplanationDto {
     description:
       'Primary explanation image URL (pre-signed S3 URL). First solution diagram when multiple exist.',
     example:
-      'https://ez-prep-images.s3.ap-south-1.amazonaws.com/explanations/def456.jpg?X-Amz-...',
+      'https://examflex-images.s3.ap-south-1.amazonaws.com/explanations/def456.jpg?X-Amz-...',
   })
   imageUrl?: string | null;
 
@@ -27,7 +27,7 @@ export class ExplanationDto {
       'Additional explanation image URLs beyond the primary `imageUrl` (empty when there is at most one image)',
     type: [String],
     example: [
-      'https://ez-prep-images.s3.ap-south-1.amazonaws.com/explanations/def457.jpg?X-Amz-...',
+      'https://examflex-images.s3.ap-south-1.amazonaws.com/explanations/def457.jpg?X-Amz-...',
     ],
   })
   imageUrls?: string[];

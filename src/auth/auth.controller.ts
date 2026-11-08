@@ -189,7 +189,7 @@ Returns refreshToken in JSON (no HttpOnly cookie).
   @ApiOperation({
     summary: 'Refresh a student access token',
     description:
-      'Web: send HttpOnly ezprep_rt cookie. Mobile: send refreshToken in JSON body. Rotates the refresh credential.',
+      'Web: send HttpOnly examflex_rt cookie. Mobile: send refreshToken in JSON body. Rotates the refresh credential.',
   })
   @ApiResponse({
     status: 200,

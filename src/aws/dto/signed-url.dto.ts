@@ -10,7 +10,7 @@ export class SignedUrlDto {
   })
   key: string;
 
-  @ApiProperty({ example: 'ez-prep-image-bucket' })
+  @ApiProperty({ example: 'examflex-image-bucket' })
   @IsString()
   @MaxLength(255)
   bucket: string;

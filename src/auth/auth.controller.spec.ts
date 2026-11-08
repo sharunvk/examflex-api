@@ -218,7 +218,7 @@ describe('AuthController', () => {
       });
       const req = {
         headers: {
-          cookie: 'ezprep_rt=old-refresh',
+          cookie: 'examflex_rt=old-refresh',
           origin: 'http://localhost:3001',
         },
         ip: '127.0.0.1',
@@ -236,7 +236,7 @@ describe('AuthController', () => {
       process.env.NODE_ENV = 'production';
       const req = {
         headers: {
-          cookie: 'ezprep_rt=old-refresh',
+          cookie: 'examflex_rt=old-refresh',
           origin: 'https://evil.example',
         },
         ip: '127.0.0.1',
@@ -252,7 +252,7 @@ describe('AuthController', () => {
       const req = {
         headers: {
           origin: 'http://localhost:3001',
-          cookie: 'ezprep_rt=still-valid-refresh',
+          cookie: 'examflex_rt=still-valid-refresh',
         },
         ip: '127.0.0.1',
       } as never;

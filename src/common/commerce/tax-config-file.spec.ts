@@ -9,28 +9,27 @@ import {
   validateTaxSeed,
 } from '../../../scripts/commerce-seed/tax-config-file';
 
-const ezprep = JSON.parse(
+const examflex = JSON.parse(
   readFileSync(
-    resolve(__dirname, '../../../scripts/commerce-seed/ezprep.json'),
+    resolve(__dirname, '../../../scripts/commerce-seed/examflex.json'),
     'utf8',
   ),
 ) as Record<string, unknown>;
 
 describe('tax config seed file', () => {
-  it('selects the file for INSTANCE_ID and never ezprep.json for examflex', () => {
-    expect(seedFileName('ezprep')).toBe('ezprep.json');
+  it('selects the file for INSTANCE_ID', () => {
     expect(seedFileName('examflex')).toBe('examflex.json');
-    expect(seedFileName('examflex')).not.toBe('ezprep.json');
+    expect(seedFileName('other')).toBe('other.json');
     expect(() => seedFileName('  ')).toThrow(/INSTANCE_ID is required/);
   });
 
   it('refuses a file whose instanceId does not match', () => {
-    expect(() => parseTaxSeed(ezprep, 'examflex')).toThrow(
-      /does not match INSTANCE_ID "examflex"/,
+    expect(() => parseTaxSeed(examflex, 'other')).toThrow(
+      /does not match INSTANCE_ID "other"/,
     );
-    expect(parseTaxSeed(ezprep, 'ezprep')).toMatchObject({
-      instanceId: 'ezprep',
-      seller: { registeredAddress: 'Kerala', gstin: '32BIAPD6927L1ZC' },
+    expect(parseTaxSeed(examflex, 'examflex')).toMatchObject({
+      instanceId: 'examflex',
+      seller: { registeredAddress: 'Kerala, India', gstin: '32BIAPD6927L1ZC' },
     });
   });
 
@@ -48,7 +47,7 @@ describe('tax config seed file', () => {
       /\[A-Z0-9\]\+/,
     ],
   ])('rejects %s', (_label, patch, pattern) => {
-    const body = structuredClone(ezprep) as Record<string, unknown>;
+    const body = structuredClone(examflex) as Record<string, unknown>;
     const seller = {
       ...(body.seller as object),
       ...((patch as { seller?: object }).seller ?? {}),
@@ -62,7 +61,7 @@ describe('tax config seed file', () => {
   });
 
   it('prints a field diff and leaves unchanged fields labeled', () => {
-    const next = parseTaxSeed(ezprep, 'ezprep');
+    const next = parseTaxSeed(examflex, 'examflex');
     const lines = describeCommerceDiff(
       {
         seller: {
@@ -77,7 +76,7 @@ describe('tax config seed file', () => {
       next,
     );
     expect(lines).toContain(
-      'seller.registeredAddress: "Kochi, Kerala" -> "Kerala"',
+      'seller.registeredAddress: "Kochi, Kerala" -> "Kerala, India"',
     );
     expect(lines).toContain('seller.legalName: unchanged');
     expect(lines).toContain('taxConfig.taxRate: unchanged');
@@ -85,15 +84,15 @@ describe('tax config seed file', () => {
 
   it('refuses a production write without --confirm-db', () => {
     expect(parseSeedArgs([])).toEqual({ apply: false, confirmDb: undefined });
-    expect(parseSeedArgs(['--apply', '--confirm-db', 'ezprep'])).toEqual({
+    expect(parseSeedArgs(['--apply', '--confirm-db', 'examflex'])).toEqual({
       apply: true,
-      confirmDb: 'ezprep',
+      confirmDb: 'examflex',
     });
     expect(() =>
       assertWriteAllowed({
         nodeEnv: 'production',
         apply: true,
-        databaseName: 'ezprep',
+        databaseName: 'examflex',
       }),
     ).toThrow(/without --confirm-db/);
     expect(() =>
@@ -101,14 +100,14 @@ describe('tax config seed file', () => {
         nodeEnv: 'production',
         apply: true,
         confirmDb: 'other',
-        databaseName: 'ezprep',
+        databaseName: 'examflex',
       }),
     ).toThrow(/does not match/);
     expect(() =>
       assertWriteAllowed({
         nodeEnv: 'development',
         apply: true,
-        databaseName: 'ezprep',
+        databaseName: 'examflex',
       }),
     ).not.toThrow();
   });

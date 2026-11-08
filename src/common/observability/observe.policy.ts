@@ -1,5 +1,5 @@
 /**
- * Decides what ez-prep-api sends to NestJS Observe.
+ * Decides what examflex-api sends to NestJS Observe.
  *
  * PM2 keeps every Nest logger line on stdout. Log forwarding is off, so those
  * lines are not observability events. The free plan counts each real request

@@ -66,8 +66,8 @@ export class CreateAdminDto {
 
   @ApiPropertyOptional({
     description:
-      'Optional email. Defaults to {username}@admin.ezprep.local if omitted.',
-    example: 'sharun@ezprep.in',
+      'Optional email. Defaults to {username}@admin.examflex.local if omitted.',
+    example: 'sharun@examflex.in',
   })
   @IsOptional()
   @IsEmail()

@@ -11,7 +11,7 @@ export class AuthResponseDto {
 
   @ApiPropertyOptional({
     description:
-      'Opaque refresh token for mobile. Omitted for web (HttpOnly ezprep_rt cookie). Rotate via POST /auth/refresh.',
+      'Opaque refresh token for mobile. Omitted for web (HttpOnly examflex_rt cookie). Rotate via POST /auth/refresh.',
   })
   refreshToken?: string;
 

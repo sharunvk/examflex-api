@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke checklist for ez-prep-api after each modernization phase.
+# Smoke checklist for examflex-api.
 # Usage: BASE_URL=http://localhost:3000 ./scripts/smoke-api.sh
 # Optional: AUTH_TOKEN=<jwt> for protected GET routes.
 
@@ -17,14 +17,14 @@ check() {
   local expected="${3:-200}"
   local url="${BASE_URL}${path}"
   local code
-  code=$(curl -sS -o /tmp/ez-prep-smoke-body -w "%{http_code}" \
+  code=$(curl -sS -o /tmp/examflex-smoke-body -w "%{http_code}" \
     -X "$method" "${AUTH_HEADER[@]}" "$url" || true)
   # 401/403 still prove the route exists and Nest is routing
   if [[ "$code" == "$expected" || "$code" == "401" || "$code" == "403" || "$code" == "400" ]]; then
     echo "OK  $method $path -> $code"
   else
     echo "FAIL $method $path -> $code (expected $expected, 401, 403, or 400)"
-    head -c 500 /tmp/ez-prep-smoke-body || true
+    head -c 500 /tmp/examflex-smoke-body || true
     echo
     exit 1
   fi

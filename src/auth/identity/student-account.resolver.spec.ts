@@ -53,7 +53,7 @@ describe('StudentAccountResolver', () => {
 
       expect(users.create).toHaveBeenCalledWith({
         name: 'User 7890',
-        email: 'user911234567890@temp.ezprep.com',
+        email: 'user911234567890@temp.examflex.com',
         phoneNumber: '+911234567890',
       });
       expect(result.isNewUser).toBe(true);
@@ -240,7 +240,7 @@ describe('StudentAccountResolver', () => {
       await resolver.resolve({ ...identity, name: undefined });
 
       expect(users.createGoogleUser).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'EzPrep User' }),
+        expect.objectContaining({ name: 'ExamFlex User' }),
       );
     });
 

@@ -388,7 +388,7 @@ function assertBullPrefix(prefix: string): string {
   const tag = prefix.match(/\{([^{}]*)\}/);
   if (!tag || tag[1].length === 0) {
     throw new Error(
-      'BULLMQ_PREFIX must include a non-empty Redis hash tag, for example {ezprep}:bull',
+      'BULLMQ_PREFIX must include a non-empty Redis hash tag, for example {examflex}:bull',
     );
   }
   return prefix;

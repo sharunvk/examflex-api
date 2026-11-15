@@ -498,7 +498,20 @@ describe('MockTestsService', () => {
       expect(result.id).toBe(TEST_ID);
     });
 
-    it('creates without an optional topic and uses dto defaults', async () => {
+    it('rejects create without a topic', async () => {
+      await expect(
+        service.createTopicWise(
+          {
+            ...dto,
+            topic: undefined as unknown as string,
+          },
+          USER_ID,
+        ),
+      ).rejects.toMatchObject({ response: { error: 'TOPIC_REQUIRED' } });
+      expect(mockTestModel.create).not.toHaveBeenCalled();
+    });
+
+    it('creates with dto defaults when optional scoring fields are omitted', async () => {
       questionModel.aggregate
         .mockResolvedValueOnce(Array.from({ length: 4 }, () => ({ _id: Q1 })))
         .mockResolvedValueOnce(Array.from({ length: 4 }, () => ({ _id: Q2 })))
@@ -511,7 +524,6 @@ describe('MockTestsService', () => {
       await service.createTopicWise(
         {
           ...dto,
-          topic: undefined,
           title: undefined,
           description: undefined,
           generationMode: undefined,
@@ -527,11 +539,14 @@ describe('MockTestsService', () => {
 
       expect(mockTestModel.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          topic: null,
+          topic: expect.anything(),
           generationMode: 'STATIC',
           marksPerQuestion: 1,
           accessMode: 'FREE',
         }),
+      );
+      expect(mockTestModel.create.mock.calls[0][0].topic.toString()).toBe(
+        TOP_ID,
       );
     });
   });
@@ -581,11 +596,33 @@ describe('MockTestsService', () => {
 
       await service.updateTopicWise(
         TEST_ID,
-        { ...dto, topic: undefined },
+        {
+          ...dto,
+          totalQuestions: 10,
+          difficultyDistribution: { easy: 4, medium: 4, hard: 2 },
+        },
         USER_ID,
       );
 
       expect(questionModel.aggregate).toHaveBeenCalled();
+    });
+
+    it('rejects update without a topic', async () => {
+      const existing = makeTest({
+        exam: { toString: () => EXAM_ID },
+        subject: { toString: () => SUB_ID },
+        topic: { toString: () => TOP_ID },
+      });
+      mockTestModel.findOne.mockReturnValueOnce(chainable(existing));
+
+      await expect(
+        service.updateTopicWise(
+          TEST_ID,
+          { ...dto, topic: undefined as unknown as string },
+          USER_ID,
+        ),
+      ).rejects.toMatchObject({ response: { error: 'TOPIC_REQUIRED' } });
+      expect(mockTestModel.findOneAndUpdate).not.toHaveBeenCalled();
     });
   });
 

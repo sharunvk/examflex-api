@@ -345,10 +345,16 @@ export class TopicWiseDraftsService {
       });
     }
 
-    let topicName: string | undefined;
-    if (dto.topic) {
-      topicName = await this.assertTopicOnSubject(subject, dto.topic);
+    if (!dto.topic) {
+      throw new BadRequestException({
+        message:
+          'A topic is required for topic-wise tests. Use sprint tests for questions from multiple topics.',
+        error: 'TOPIC_REQUIRED',
+      });
     }
+
+    const topicName = await this.assertTopicOnSubject(subject, dto.topic);
+    const topicId = new Types.ObjectId(dto.topic);
 
     const sampled = await sampleTopicWiseQuestionIds(this.questionModel, {
       exam: dto.exam,
@@ -362,7 +368,7 @@ export class TopicWiseDraftsService {
     const questions = sampled.map((question, position) => ({
       question: question._id,
       subject: new Types.ObjectId(dto.subject),
-      topic: dto.topic ? new Types.ObjectId(dto.topic) : question.topic,
+      topic: topicId,
       difficultyLevel: question.difficultyLevel,
       position,
       marksPerQuestion,
@@ -376,7 +382,7 @@ export class TopicWiseDraftsService {
         userId,
         subjectId: subject._id as Types.ObjectId,
         subjectName: subject.name,
-        topicId: dto.topic ? new Types.ObjectId(dto.topic) : undefined,
+        topicId,
         topicName,
         difficultyDistribution: dto.difficultyDistribution,
         marksPerQuestion,
@@ -448,7 +454,7 @@ export class TopicWiseDraftsService {
     userId: string;
     subjectId: Types.ObjectId;
     subjectName: string;
-    topicId?: Types.ObjectId;
+    topicId: Types.ObjectId;
     topicName?: string;
     difficultyDistribution: { easy: number; medium: number; hard: number };
     marksPerQuestion: number;
@@ -494,6 +500,14 @@ export class TopicWiseDraftsService {
     dto: PublishTopicWiseDraftDto,
     userId: string,
   ): Promise<{ mockTestId: string; draft: TopicWiseDraftResponseDto }> {
+    if (!draft.topic) {
+      throw new BadRequestException({
+        message:
+          'A topic is required for topic-wise tests. Discard this draft and create a new one with a topic. Use sprint tests for questions from multiple topics.',
+        error: 'TOPIC_REQUIRED',
+      });
+    }
+
     const ordered = [...draft.questions].sort(
       (a, b) => a.position - b.position,
     );
@@ -545,7 +559,7 @@ export class TopicWiseDraftsService {
       durationInMinutes: draft.durationInMinutes,
       exam: draft.exam,
       subject: draft.subject,
-      topic: draft.topic ?? null,
+      topic: draft.topic,
       difficultyDistribution: draft.difficultyDistribution,
       title,
       description: description || null,
@@ -734,7 +748,14 @@ export class TopicWiseDraftsService {
     draftTopicId?: string,
     incomingTopicId?: string,
   ): void {
-    if (draftTopicId && incomingTopicId !== draftTopicId) {
+    if (!draftTopicId) {
+      throw new BadRequestException({
+        message:
+          'A topic is required for topic-wise tests. Discard this draft and create a new one with a topic.',
+        error: 'TOPIC_REQUIRED',
+      });
+    }
+    if (incomingTopicId !== draftTopicId) {
       throw new BadRequestException({
         message: 'Replacement question must belong to the same topic',
         error: 'TOPIC_MISMATCH',
@@ -767,13 +788,20 @@ export class TopicWiseDraftsService {
       .exec();
     const byId = new Map(docs.map(doc => [doc._id.toString(), doc]));
     const draftTopic = draft.topic?.toString();
+    if (!draftTopic) {
+      throw new BadRequestException({
+        message:
+          'A topic is required for topic-wise tests. Discard this draft and create a new one with a topic.',
+        error: 'TOPIC_REQUIRED',
+      });
+    }
 
     for (const slot of ordered) {
       const live = byId.get(slot.question.toString());
       const sameSubject =
         live?.subject?.toString() === draft.subject.toString();
       const sameDifficulty = live?.difficultyLevel === slot.difficultyLevel;
-      const sameTopic = !draftTopic || live?.topic?.toString() === draftTopic;
+      const sameTopic = live?.topic?.toString() === draftTopic;
       const tagged = live ? isTaggedToExam(live.exams, draft.exam) : false;
       if (!live || !sameSubject || !sameDifficulty || !sameTopic || !tagged) {
         throw new BadRequestException({

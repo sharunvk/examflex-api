@@ -5,7 +5,7 @@ import { QuestionDocument } from '../mock-test-attempts/schemas/question.schema'
 export interface TopicWiseSampleInput {
   exam: string;
   subject: string;
-  topic?: string;
+  topic: string;
   difficultyDistribution: { easy: number; medium: number; hard: number };
 }
 
@@ -17,22 +17,28 @@ export interface SampledTopicWiseQuestion {
 }
 
 /**
- * Samples a topic-wise paper: exam-tagged, subject (and optional topic),
+ * Samples a topic-wise paper: exam-tagged, subject + topic,
  * active, not deleted, one random bucket per difficulty, easy then medium then hard.
  */
 export async function sampleTopicWiseQuestionIds(
   questionModel: Model<QuestionDocument>,
   input: TopicWiseSampleInput,
 ): Promise<SampledTopicWiseQuestion[]> {
+  if (!input.topic || !Types.ObjectId.isValid(input.topic)) {
+    throw new BadRequestException({
+      message:
+        'A topic is required for topic-wise tests. Use sprint tests for questions from multiple topics.',
+      error: 'TOPIC_REQUIRED',
+    });
+  }
+
   const baseMatch: Record<string, unknown> = {
     subject: new Types.ObjectId(input.subject),
+    topic: new Types.ObjectId(input.topic),
     exams: new Types.ObjectId(input.exam),
     isActive: true,
     isDeleted: { $ne: true },
   };
-  if (input.topic) {
-    baseMatch.topic = new Types.ObjectId(input.topic);
-  }
 
   const levels = (['easy', 'medium', 'hard'] as const).filter(
     level => input.difficultyDistribution[level] > 0,

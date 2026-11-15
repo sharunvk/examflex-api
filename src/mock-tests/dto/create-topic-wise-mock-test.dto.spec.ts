@@ -9,43 +9,65 @@ function basePayload(overrides: Record<string, unknown> = {}) {
     durationInMinutes: 10,
     exam: '64f123456789abcdef123456',
     subject: '64f123456789abcdef123457',
+    // Topic is required for TOPIC_WISE papers (subject-wide papers are not allowed).
+    topic: '64f123456789abcdef123458',
     difficultyDistribution: { easy: 4, medium: 4, hard: 2 },
     ...overrides,
   };
 }
 
-describe('CreateTopicWiseMockTestDto accessMode', () => {
-  it('accepts FREE', async () => {
-    const dto = plainToInstance(
-      CreateTopicWiseMockTestDto,
-      basePayload({ accessMode: AccessMode.FREE }),
-    );
-    expect(await validate(dto)).toHaveLength(0);
-    expect(dto.accessMode).toBe(AccessMode.FREE);
+describe('CreateTopicWiseMockTestDto', () => {
+  describe('topic', () => {
+    it('rejects omitted topic', async () => {
+      const { topic: _omit, ...withoutTopic } = basePayload();
+      const dto = plainToInstance(CreateTopicWiseMockTestDto, withoutTopic);
+      const errors = await validate(dto);
+      expect(errors.some(error => error.property === 'topic')).toBe(true);
+    });
+
+    it('rejects a non-ObjectId topic', async () => {
+      const dto = plainToInstance(
+        CreateTopicWiseMockTestDto,
+        basePayload({ topic: 'not-an-id' }),
+      );
+      const errors = await validate(dto);
+      expect(errors.some(error => error.property === 'topic')).toBe(true);
+    });
   });
 
-  it('accepts ENTITLED', async () => {
-    const dto = plainToInstance(
-      CreateTopicWiseMockTestDto,
-      basePayload({ accessMode: AccessMode.ENTITLED }),
-    );
-    expect(await validate(dto)).toHaveLength(0);
-    expect(dto.accessMode).toBe(AccessMode.ENTITLED);
-  });
+  describe('accessMode', () => {
+    it('accepts FREE', async () => {
+      const dto = plainToInstance(
+        CreateTopicWiseMockTestDto,
+        basePayload({ accessMode: AccessMode.FREE }),
+      );
+      expect(await validate(dto)).toHaveLength(0);
+      expect(dto.accessMode).toBe(AccessMode.FREE);
+    });
 
-  it('accepts omitted accessMode (schema default FREE)', async () => {
-    const dto = plainToInstance(CreateTopicWiseMockTestDto, basePayload());
-    expect(await validate(dto)).toHaveLength(0);
-    expect(dto.accessMode).toBeUndefined();
-  });
+    it('accepts ENTITLED', async () => {
+      const dto = plainToInstance(
+        CreateTopicWiseMockTestDto,
+        basePayload({ accessMode: AccessMode.ENTITLED }),
+      );
+      expect(await validate(dto)).toHaveLength(0);
+      expect(dto.accessMode).toBe(AccessMode.ENTITLED);
+    });
 
-  it('rejects invalid accessMode', async () => {
-    const dto = plainToInstance(
-      CreateTopicWiseMockTestDto,
-      basePayload({ accessMode: 'PAID' }),
-    );
-    const errors = await validate(dto);
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some(error => error.property === 'accessMode')).toBe(true);
+    it('accepts omitted accessMode (schema default FREE)', async () => {
+      const dto = plainToInstance(CreateTopicWiseMockTestDto, basePayload());
+      expect(await validate(dto)).toHaveLength(0);
+      expect(dto.accessMode).toBeUndefined();
+    });
+
+    it('rejects invalid accessMode', async () => {
+      const dto = plainToInstance(
+        CreateTopicWiseMockTestDto,
+        basePayload({ accessMode: 'PAID' }),
+      );
+      const errors = await validate(dto);
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors.some(error => error.property === 'accessMode')).toBe(true);
+    });
   });
 });

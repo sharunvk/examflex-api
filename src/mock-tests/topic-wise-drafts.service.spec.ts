@@ -479,16 +479,45 @@ describe('TopicWiseDraftsService', () => {
     ).rejects.toMatchObject({ response: { error: 'DUPLICATE_QUESTION' } });
   });
 
-  it('allows another topic on a subject-wide draft', async () => {
+  it('rejects replace on a draft without a topic', async () => {
     const draft = makeDraft({ topic: undefined, topicName: undefined });
     draftModel.findById.mockReturnValue(chainable(draft));
     questionModel.findById.mockReturnValue(
       chainable(questionRow(Q2, { topic: new Types.ObjectId(OTHER_TOP) })),
     );
 
-    await service.replaceQuestion(DRAFT_ID, 0, Q2, USER_ID);
+    await expect(
+      service.replaceQuestion(DRAFT_ID, 0, Q2, USER_ID),
+    ).rejects.toMatchObject({ response: { error: 'TOPIC_REQUIRED' } });
+  });
 
-    expect(draft.questions[0].topic.toString()).toBe(OTHER_TOP);
+  it('rejects sampled create without a topic', async () => {
+    activeExam();
+
+    await expect(
+      service.createDraft(
+        {
+          exam: EXAM_ID,
+          subject: SUB_ID,
+          totalQuestions: 10,
+          durationInMinutes: 15,
+          difficultyDistribution: { easy: 10, medium: 0, hard: 0 },
+        },
+        USER_ID,
+      ),
+    ).rejects.toMatchObject({ response: { error: 'TOPIC_REQUIRED' } });
+    expect(draftModel.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects publish when the draft has no topic', async () => {
+    const draft = makeDraft({ topic: undefined, topicName: undefined });
+    draftModel.findOneAndUpdate.mockResolvedValue(draft);
+    draftModel.updateOne.mockReturnValue(chainable({ acknowledged: true }));
+
+    await expect(
+      service.publishDraft(DRAFT_ID, { title: 'No topic' }, USER_ID),
+    ).rejects.toMatchObject({ response: { error: 'TOPIC_REQUIRED' } });
+    expect(mockTestModel.create).not.toHaveBeenCalled();
   });
 
   it('publishes a TOPIC_WISE mock test with the draft fields', async () => {

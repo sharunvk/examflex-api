@@ -4,6 +4,14 @@ NestJS backend for ExamFlex. CORS, branding, and commerce settings come from env
 
 Routes live under `/api/v1`. Interactive docs: `/api/docs`. Health: `GET /api/v1/health`.
 
+## Origin & naming
+
+ExamFlex API is a **standalone fork** of the EzPrep API, built on top of that codebase for the ExamFlex deployment. EzPrep remains a separate product; this repo is not shared with it at runtime.
+
+**New code, docs, and identifiers should use ExamFlex / `examflex` naming.** Do not introduce new `EzPrep` / `ezprep` / `EZPREP` names.
+
+Some docs, tests, and seed values still mention EzPrep for historical or dual-instance context. Prefer ExamFlex fixtures and examples in new work. Do not change live runtime contracts (`INSTANCE_ID`, Redis prefixes, cookies, invoice series) just to rebrand—those need an explicit migration plan.
+
 ## Stack
 
 - **NestJS** 11 + **TypeScript**

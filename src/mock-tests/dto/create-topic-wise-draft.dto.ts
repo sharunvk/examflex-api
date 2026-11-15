@@ -48,9 +48,9 @@ export class CreateTopicWiseDraftDto {
 
   @ApiPropertyOptional({
     description:
-      'Optional on the sampled path. When set, every sampled question must have this topic, and the topic must belong to the subject.',
+      'Required when questionIds is omitted. Every sampled question must have this topic, and the topic must belong to the subject. On the hand-picked path, topic is inferred from the selected questions.',
   })
-  @IsOptional()
+  @ValidateIf((dto: CreateTopicWiseDraftDto) => !dto.questionIds?.length)
   @IsMongoId()
   topic?: string;
 

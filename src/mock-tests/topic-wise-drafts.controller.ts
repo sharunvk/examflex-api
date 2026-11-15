@@ -59,7 +59,7 @@ export class TopicWiseDraftsController {
   @ApiOperation({
     summary: 'Create a topic-wise mock draft (Admin)',
     description: `
-When \`questionIds\` is omitted, samples questions with the same rules as instant topic-wise create: exam tag, subject, optional topic, and the easy/medium/hard mix.
+When \`questionIds\` is omitted, samples questions with the same rules as instant topic-wise create: exam tag, subject, required topic, and the easy/medium/hard mix.
 When \`questionIds\` is set, those questions are frozen in that order. They must share one subject and one topic.
 The result is a draft in \`topicwisetestdrafts\` with status \`REVIEW\`. Nothing is written to \`mocktests\` until publish.
     `,

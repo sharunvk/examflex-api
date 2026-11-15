@@ -251,6 +251,7 @@ export class MockTestsService {
     userId: string,
   ): Promise<MockTestResponseDto> {
     this.assertDifficultySum(dto);
+    this.assertTopicRequired(dto.topic);
     const questionIds = await this.sampleQuestionIds(dto);
 
     const mockTest = await this.mockTestModel.create({
@@ -260,7 +261,7 @@ export class MockTestsService {
       durationInMinutes: dto.durationInMinutes,
       exam: new Types.ObjectId(dto.exam),
       subject: new Types.ObjectId(dto.subject),
-      topic: dto.topic ? new Types.ObjectId(dto.topic) : null,
+      topic: new Types.ObjectId(dto.topic),
       difficultyDistribution: dto.difficultyDistribution,
       title: dto.title || null,
       description: dto.description || null,
@@ -297,6 +298,7 @@ export class MockTestsService {
     }
 
     this.assertDifficultySum(dto);
+    this.assertTopicRequired(dto.topic);
     const shouldResample = this.shouldResampleTopicWise(existing, dto);
     const questionIds = shouldResample
       ? await this.sampleQuestionIds(dto)
@@ -314,7 +316,7 @@ export class MockTestsService {
             durationInMinutes: dto.durationInMinutes,
             exam: new Types.ObjectId(dto.exam),
             subject: new Types.ObjectId(dto.subject),
-            topic: dto.topic ? new Types.ObjectId(dto.topic) : null,
+            topic: new Types.ObjectId(dto.topic),
             difficultyDistribution: dto.difficultyDistribution,
             title: dto.title,
             description: dto.description,
@@ -369,6 +371,16 @@ export class MockTestsService {
       throw new BadRequestException(
         `Difficulty distribution sum (${sum}) must equal total questions (${dto.totalQuestions})`,
       );
+    }
+  }
+
+  private assertTopicRequired(topic?: string): void {
+    if (!topic || !Types.ObjectId.isValid(topic)) {
+      throw new BadRequestException({
+        message:
+          'A topic is required for topic-wise tests. Use sprint tests for questions from multiple topics.',
+        error: 'TOPIC_REQUIRED',
+      });
     }
   }
 

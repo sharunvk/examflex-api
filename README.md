@@ -67,7 +67,7 @@ Request/response shapes are in Swagger. Deeper docs live under [`docs/`](docs/).
    |---|---|
    | `MONGODB_URI` | Database connection |
    | `INSTANCE_ID`, `INSTANCE_NAME` | App identity (`examflex` / `ExamFlex`) |
-   | `CORS_ORIGINS` | Comma-separated browser origins. Required in production. Local apps often use `http://localhost:3001` (student) and `http://localhost:3002` (admin) |
+   | `CORS_ORIGINS` | Comma-separated browser origins. Required in production. Local defaults include `http://localhost:3001` (admin) and `http://localhost:3002` (examflex-app) |
    | `PORT` | Default `3000` |
    | `JWT_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN` | Session tokens (default expiry `7d`). Must match admin console `JWT_SECRET` |
    | `AUTH_COOKIE_DOMAIN` | Optional refresh-cookie Domain for production same-site web (e.g. `.examflex.in`) |
@@ -145,7 +145,7 @@ If an OTP account’s email was typed on the profile and never verified, a later
 ## Related clients
 
 - **examflex-admin** — staff console (default local port **3002**); proxies to this API and shares `JWT_SECRET`
-- Student app — typically local port **3001**; must appear in `CORS_ORIGINS` and `GOOGLE_REDIRECT_URIS`
+- Student app (examflex-app) — local port **3002**; must appear in `CORS_ORIGINS` and `GOOGLE_REDIRECT_URIS` (exact match, e.g. `http://localhost:3002`)
 
 ## Docs index
 

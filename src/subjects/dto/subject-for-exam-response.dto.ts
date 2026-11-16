@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Expose } from 'class-transformer';
+import { Expose, Type } from 'class-transformer';
+import { SubjectTopicDto } from './subject-response.dto';
 
 export class SubjectForExamResponseDto {
   @ApiProperty({
@@ -23,7 +24,17 @@ export class SubjectForExamResponseDto {
   @Expose()
   description?: string;
 
+  @ApiProperty({
+    description:
+      'Active topics on this subject (for chapter-wise filters). Empty when none.',
+    type: [SubjectTopicDto],
+  })
+  @Expose()
+  @Type(() => SubjectTopicDto)
+  topics: SubjectTopicDto[];
+
   constructor(partial: Partial<SubjectForExamResponseDto>) {
     Object.assign(this, partial);
+    this.topics = partial.topics ?? [];
   }
 }

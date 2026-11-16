@@ -599,10 +599,14 @@ export class MockTestsService {
     userId?: string,
     search?: string,
     subjectId?: string,
+    topicId?: string,
   ): Promise<PaginatedMockTestListResponseDto> {
     const examObjectId = this.requireObjectId(examId, 'exam ID');
     const subjectObjectId = subjectId
       ? this.requireObjectId(subjectId, 'subject ID')
+      : undefined;
+    const topicObjectId = topicId
+      ? this.requireObjectId(topicId, 'topic ID')
       : undefined;
 
     const validPage = Math.max(1, page);
@@ -620,8 +624,10 @@ export class MockTestsService {
       query.subject = subjectObjectId;
     }
 
-    // Search by topic name if provided
-    if (search && search.trim()) {
+    // Exact topic filter (chapter select) takes priority over name search
+    if (topicObjectId) {
+      query.topic = topicObjectId;
+    } else if (search && search.trim()) {
       const matchingTopics = await this.topicModel
         .find({ name: { $regex: escapeRegex(search.trim()), $options: 'i' } })
         .select('_id')

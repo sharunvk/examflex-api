@@ -99,8 +99,17 @@ describe('MockTestsController', () => {
       data: page.data,
     });
     await expect(
-      controller.findByExam('e1', 1, 10, 's', 'sub', user as any),
+      controller.findByExam('e1', 1, 10, 's', 'sub', 'topic', user as any),
     ).resolves.toMatchObject({ data: page.data });
+    expect(mockTestsService.findByExam).toHaveBeenCalledWith(
+      'e1',
+      1,
+      10,
+      user.id,
+      's',
+      'sub',
+      'topic',
+    );
     await expect(
       controller.findBySubject('s1', 1, 10, user as any),
     ).resolves.toMatchObject({ data: page.data });

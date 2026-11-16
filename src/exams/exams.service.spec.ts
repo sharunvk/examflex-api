@@ -148,7 +148,7 @@ describe('ExamsService', () => {
   });
 
   describe('getExamsByCategory', () => {
-    it('groups exams and formats duration', async () => {
+    it('groups exams, formats duration, and returns paper counts', async () => {
       categoryModel.find.mockReturnValue(
         chain([
           {
@@ -171,7 +171,13 @@ describe('ExamsService', () => {
             totalMarks: 20,
             trending: true,
             category: { toString: () => OID },
-            subjects: [1, 2],
+            subjects: [
+              {
+                marksPerQuestion: 2,
+                hasNegativeMarking: true,
+                negativeMarksPerQuestion: 0.5,
+              },
+            ],
           },
           {
             _id: { toString: () => '507f1f77bcf86cd799439013' },
@@ -190,7 +196,15 @@ describe('ExamsService', () => {
         ]),
       );
       examModel.aggregate.mockReturnValue(
-        chain([{ _id: { toString: () => OID2 }, testsCount: 3 }]),
+        chain([
+          {
+            _id: { toString: () => OID2 },
+            paperCounts: [
+              { _id: 'TOPIC_WISE', count: 3 },
+              { _id: 'FULL_EXAM', count: 1 },
+            ],
+          },
+        ]),
       );
 
       const result = await service.getExamsByCategory();
@@ -199,16 +213,31 @@ describe('ExamsService', () => {
         isDeleted: { $ne: true },
         showInApp: true,
       });
-      expect(result).toHaveLength(1);
-      expect(result[0].exams[0].duration).toBe('1h 30min');
-      expect(result[0].exams[0].testsCount).toBe(3);
-      expect(result[0].exams[0].trending).toBe(true);
-      expect(result[0].exams[1].trending).toBe(false);
-      expect(result[0].exams[1].duration).toBe('45min');
-      expect(result[0].exams[2].duration).toBe('1h');
+      expect(result.data).toHaveLength(1);
+      expect(result.pagination).toMatchObject({
+        total: 1,
+        page: 1,
+        limit: 1,
+        hasNextPage: false,
+        hasPrevPage: false,
+      });
+      expect(result.data[0].exams[0].duration).toBe('1h 30min');
+      expect(result.data[0].exams[0].description).toBe('full');
+      expect(result.data[0].exams[0].imageUrl).toBe('img');
+      expect(result.data[0].exams[0].testsCount).toBe(3);
+      expect(result.data[0].exams[0].paperCounts).toEqual({
+        chapterWise: 3,
+        fullMocks: 1,
+        sprint: 0,
+      });
+      expect(result.data[0].exams[0].statsLabel).toContain('10 QUESTIONS');
+      expect(result.data[0].exams[0].trending).toBe(true);
+      expect(result.data[0].exams[1].trending).toBe(false);
+      expect(result.data[0].exams[1].duration).toBe('45min');
+      expect(result.data[0].exams[2].duration).toBe('1h');
     });
 
-    it('orders categories by priority, then name', async () => {
+    it('orders categories by priority, skips empty, and paginates', async () => {
       categoryModel.find.mockReturnValue(
         chain([
           {
@@ -230,17 +259,38 @@ describe('ExamsService', () => {
           },
         ]),
       );
-      examModel.find.mockReturnValue(chain([]));
+      examModel.find.mockReturnValue(
+        chain([
+          {
+            _id: { toString: () => OID2 },
+            name: 'Exam A',
+            category: { toString: () => 'b' },
+            subjects: [],
+          },
+          {
+            _id: { toString: () => '507f1f77bcf86cd799439013' },
+            name: 'Exam Z',
+            category: { toString: () => 'a' },
+            subjects: [],
+          },
+        ]),
+      );
       examModel.aggregate.mockReturnValue(chain([]));
 
-      const result = await service.getExamsByCategory();
+      const page1 = await service.getExamsByCategory(1, 1);
+      expect(page1.data.map(category => category.name)).toEqual(['Alpha']);
+      expect(page1.pagination).toMatchObject({
+        total: 2,
+        page: 1,
+        totalPages: 2,
+        hasNextPage: true,
+        hasPrevPage: false,
+      });
 
-      expect(result.map(category => category.name)).toEqual([
-        'Alpha',
-        'Zebra',
-        'Middle',
-      ]);
-      expect(result.map(category => category.priority)).toEqual([5, 1, 0]);
+      const page2 = await service.getExamsByCategory(2, 1);
+      expect(page2.data.map(category => category.name)).toEqual(['Zebra']);
+      expect(page2.pagination.hasPrevPage).toBe(true);
+      expect(page2.pagination.hasNextPage).toBe(false);
     });
   });
 

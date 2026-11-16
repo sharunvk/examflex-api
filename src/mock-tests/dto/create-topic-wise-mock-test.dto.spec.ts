@@ -19,7 +19,8 @@ function basePayload(overrides: Record<string, unknown> = {}) {
 describe('CreateTopicWiseMockTestDto', () => {
   describe('topic', () => {
     it('rejects omitted topic', async () => {
-      const { topic: _omit, ...withoutTopic } = basePayload();
+      const withoutTopic = basePayload();
+      delete withoutTopic.topic;
       const dto = plainToInstance(CreateTopicWiseMockTestDto, withoutTopic);
       const errors = await validate(dto);
       expect(errors.some(error => error.property === 'topic')).toBe(true);

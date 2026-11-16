@@ -173,7 +173,12 @@ export class SubjectsService {
    */
   async findByExam(examId: string): Promise<SubjectForExamResponseDto[]> {
     const results = await this.examModel
-      .aggregate<{ _id: Types.ObjectId; name: string; description?: string }>([
+      .aggregate<{
+        _id: Types.ObjectId;
+        name: string;
+        description?: string;
+        topics: Array<{ _id: Types.ObjectId; name: string }>;
+      }>([
         {
           $match: {
             _id: new Types.ObjectId(examId),
@@ -215,10 +220,29 @@ export class SubjectsService {
           },
         },
         {
+          $lookup: {
+            from: 'topics',
+            let: { topicIds: { $ifNull: ['$subjectDoc.topics', []] } },
+            pipeline: [
+              {
+                $match: {
+                  $expr: { $in: ['$_id', '$$topicIds'] },
+                  isDeleted: { $ne: true },
+                  isActive: true,
+                },
+              },
+              { $project: { _id: 1, name: 1 } },
+              { $sort: { name: 1 } },
+            ],
+            as: 'topics',
+          },
+        },
+        {
           $group: {
             _id: '$subjectDoc._id',
             name: { $first: '$subjectDoc.name' },
             description: { $first: '$subjectDoc.description' },
+            topics: { $first: '$topics' },
           },
         },
         { $sort: { name: 1 } },
@@ -242,6 +266,10 @@ export class SubjectsService {
           id: doc._id.toString(),
           name: doc.name,
           description: doc.description,
+          topics: (doc.topics || []).map(topic => ({
+            id: topic._id.toString(),
+            name: topic.name,
+          })),
         }),
     );
   }

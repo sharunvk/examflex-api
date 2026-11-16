@@ -10,7 +10,10 @@ import { Exam, ExamDocument } from './schemas/exam.schema';
 import { CreateExamDto } from './dto/create-exam.dto';
 import { UpdateExamDto } from './dto/update-exam.dto';
 import { ExamResponseDto } from './dto/exam-response.dto';
-import { ExamsByCategoryResponseDto } from './dto/exams-by-category-response.dto';
+import {
+  CategoryGroupDto,
+  ExamsByCategoryPageDto,
+} from './dto/exams-by-category-response.dto';
 import { compareByDashboardPriority } from '../categories/category-priority';
 import { PaginatedExamsResponseDto } from './dto/paginated-exams-response.dto';
 import {
@@ -26,6 +29,9 @@ import {
   omitActorFields,
   updatedByFields,
 } from '../common/types/to-actor-object-id';
+import { PaginationMetaDto } from '../common/dto/api-response.dto';
+import { PaperType } from '../common/enums/paper-type.enum';
+import { buildExamStatsLabel } from './exam-stats-label';
 
 @Injectable()
 export class ExamsService {
@@ -146,10 +152,16 @@ export class ExamsService {
   }
 
   /**
-   * Get exams grouped by category (PUBLIC API)
-   * Returns all active categories and their exams
+   * Get exams grouped by category (PUBLIC API) for the student mocks hub.
+   * Returns one category page by default; skips categories with no showInApp exams.
    */
-  async getExamsByCategory(): Promise<ExamsByCategoryResponseDto> {
+  async getExamsByCategory(
+    page: number = 1,
+    limit: number = 1,
+  ): Promise<ExamsByCategoryPageDto> {
+    const validPage = Math.max(1, page);
+    const validLimit = Math.min(Math.max(1, limit), 50);
+
     const categoryQuery: FilterQuery<Category> = { isActive: true };
     const examQuery: FilterQuery<Exam> = {
       isActive: true,
@@ -157,7 +169,6 @@ export class ExamsService {
       showInApp: true,
     };
 
-    // Get all active categories, highest dashboard priority first
     const categories = (
       await this.categoryModel
         .find(categoryQuery)
@@ -166,12 +177,14 @@ export class ExamsService {
         .exec()
     ).sort(compareByDashboardPriority);
 
-    // Get all active exams
     const exams = await this.examModel.find(examQuery).lean().exec();
 
-    // Get mock test counts per exam (from mocktests collection)
-    const mockTestCounts = await this.examModel
-      .aggregate([
+    const paperCountRows = await this.examModel
+      .aggregate<{
+        _id: Types.ObjectId;
+        paperCounts: Array<{ _id: string; count: number }>;
+      }>([
+        { $match: examQuery },
         {
           $lookup: {
             from: 'mocktests',
@@ -182,63 +195,106 @@ export class ExamsService {
                   $expr: { $eq: ['$exam', '$$examId'] },
                   isActive: true,
                   isDeleted: false,
-                  paperType: 'TOPIC_WISE',
+                  paperType: {
+                    $in: [
+                      PaperType.TOPIC_WISE,
+                      PaperType.FULL_EXAM,
+                      PaperType.SPRINT,
+                    ],
+                  },
                 },
               },
-              { $count: 'count' },
+              { $group: { _id: '$paperType', count: { $sum: 1 } } },
             ],
-            as: 'mockTests',
+            as: 'paperCounts',
           },
         },
-        {
-          $project: {
-            _id: 1,
-            testsCount: {
-              $ifNull: [{ $arrayElemAt: ['$mockTests.count', 0] }, 0],
-            },
-          },
-        },
+        { $project: { _id: 1, paperCounts: 1 } },
       ])
       .exec();
 
-    const testCountMap = new Map(
-      mockTestCounts.map(item => [item._id.toString(), item.testsCount]),
+    const paperCountMap = new Map(
+      paperCountRows.map(row => {
+        const counts = { chapterWise: 0, fullMocks: 0, sprint: 0 };
+        for (const entry of row.paperCounts || []) {
+          if (entry._id === PaperType.TOPIC_WISE) {
+            counts.chapterWise = entry.count;
+          } else if (entry._id === PaperType.FULL_EXAM) {
+            counts.fullMocks = entry.count;
+          } else if (entry._id === PaperType.SPRINT) {
+            counts.sprint = entry.count;
+          }
+        }
+        return [row._id.toString(), counts] as const;
+      }),
     );
 
-    // Group exams by category and return as array
-    const result: ExamsByCategoryResponseDto = [];
+    const allGroups: CategoryGroupDto[] = [];
 
     for (const category of categories) {
       const categoryExams = exams.filter(
         exam =>
           exam.category && exam.category.toString() === category._id.toString(),
       );
+      if (categoryExams.length === 0) {
+        continue;
+      }
 
-      // Include category even if it has no exams
-      result.push({
+      allGroups.push({
         id: category._id.toString(),
         name: category.name,
         shortName: category.shortName,
         imageUrl: category.imageUrl,
         description: category.description,
         priority: category.priority ?? 0,
-        exams: categoryExams.map(exam => ({
-          id: exam._id.toString(),
-          title: exam.name,
-          fullName: exam.description,
-          duration: exam.duration
-            ? this.formatDuration(exam.duration)
-            : undefined,
-          totalQuestions: exam.totalQuestions,
-          totalMarks: exam.totalMarks,
-          testsCount: testCountMap.get(exam._id.toString()) || 0,
-          subjectsCount: exam.subjects?.length || 0,
-          trending: exam.trending === true,
-        })),
+        exams: categoryExams.map(exam => {
+          const paperCounts = paperCountMap.get(exam._id.toString()) || {
+            chapterWise: 0,
+            fullMocks: 0,
+            sprint: 0,
+          };
+          const description = exam.description;
+          return {
+            id: exam._id.toString(),
+            title: exam.name,
+            description,
+            imageUrl: category.imageUrl,
+            fullName: description,
+            duration: exam.duration
+              ? this.formatDuration(exam.duration)
+              : undefined,
+            totalQuestions: exam.totalQuestions,
+            totalMarks: exam.totalMarks,
+            statsLabel: buildExamStatsLabel({
+              totalQuestions: exam.totalQuestions,
+              duration: exam.duration,
+              totalMarks: exam.totalMarks,
+              subjects: exam.subjects,
+            }),
+            testsCount: paperCounts.chapterWise,
+            paperCounts,
+            subjectsCount: exam.subjects?.length || 0,
+            trending: exam.trending === true,
+          };
+        }),
       });
     }
 
-    return result;
+    const total = allGroups.length;
+    const totalPages = total === 0 ? 0 : Math.ceil(total / validLimit);
+    const skip = (validPage - 1) * validLimit;
+    const data = allGroups.slice(skip, skip + validLimit);
+
+    const pagination: PaginationMetaDto = {
+      total,
+      page: validPage,
+      limit: validLimit,
+      totalPages,
+      hasNextPage: validPage < totalPages,
+      hasPrevPage: validPage > 1 && totalPages > 0,
+    };
+
+    return { data, pagination };
   }
 
   /**

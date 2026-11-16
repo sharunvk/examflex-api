@@ -12,7 +12,12 @@ export function parseCorsOrigins(raw?: string | null): string[] {
     );
   }
 
-  return ['http://localhost:3000', 'http://localhost:3001'];
+  // examflex-api :3000, examflex-admin :3001, examflex-app :3002
+  return [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:3002',
+  ];
 }
 
 export function getCorsConfig(corsOriginsEnv?: string | null) {

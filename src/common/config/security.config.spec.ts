@@ -30,6 +30,7 @@ describe('parseCorsOrigins', () => {
     expect(parseCorsOrigins(undefined)).toEqual([
       'http://localhost:3000',
       'http://localhost:3001',
+      'http://localhost:3002',
     ]);
   });
 

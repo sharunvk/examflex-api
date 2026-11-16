@@ -238,7 +238,24 @@ describe('HttpExceptionFilter', () => {
     expect(json).toHaveBeenCalledWith(
       expect.objectContaining({
         error: 'InvalidId',
-        message: 'Invalid _id: bad-id',
+        message: 'Invalid ID format',
+      }),
+    );
+  });
+
+  it('should sanitize BSON ObjectId constructor errors', () => {
+    const bson = new Error(
+      'input must be a 24 character hex string, 12 byte Uint8Array, or an integer',
+    );
+    bson.name = 'BSONError';
+
+    filter.catch(bson, host);
+
+    expect(status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'InvalidId',
+        message: 'Invalid ID format',
       }),
     );
   });

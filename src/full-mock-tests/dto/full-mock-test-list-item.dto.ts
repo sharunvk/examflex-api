@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AccessMode } from '../../common/enums/access-mode.enum';
 import { UserAttemptAction } from '../../common/enums/user-attempt-action.enum';
 import { AccessResponseDto } from '../../access/dto/access-response.dto';
+import { AttemptSummaryDto } from '../../mock-tests/dto/attempt-summary.dto';
 import { ExamSummaryDto } from '../../mock-tests/dto/mock-test-list-item.dto';
 import { DraftSubjectBlockDto } from './draft-response.dto';
 
@@ -167,6 +168,13 @@ export class FullMockTestListItemDto {
     example: '64f123456789abcdef123456',
   })
   resumeAttemptId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Authenticated-only card snapshot (progress, scores, Mistake Book teaser). Omitted for anonymous lists.',
+    type: AttemptSummaryDto,
+  })
+  attemptSummary?: AttemptSummaryDto;
 
   @ApiPropertyOptional({
     description:

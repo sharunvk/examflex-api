@@ -187,12 +187,20 @@ describe('SubjectsService', () => {
   });
 
   describe('findByExam', () => {
-    it('returns subjects for an exam', async () => {
+    it('returns subjects for an exam with topics', async () => {
       examModel.aggregate.mockReturnValue(
-        chain([{ _id: { toString: () => OID }, name: 'QA', description: 'd' }]),
+        chain([
+          {
+            _id: { toString: () => OID },
+            name: 'QA',
+            description: 'd',
+            topics: [{ _id: { toString: () => OID }, name: 'Ratio' }],
+          },
+        ]),
       );
       const result = await service.findByExam(OID);
       expect(result).toHaveLength(1);
+      expect(result[0].topics).toEqual([{ id: OID, name: 'Ratio' }]);
     });
 
     it('returns empty list when exam exists but has no subjects', async () => {

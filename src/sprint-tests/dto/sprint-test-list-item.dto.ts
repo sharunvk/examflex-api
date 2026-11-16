@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AccessMode } from '../../common/enums/access-mode.enum';
 import { UserAttemptAction } from '../../common/enums/user-attempt-action.enum';
 import { AccessResponseDto } from '../../access/dto/access-response.dto';
+import { AttemptSummaryDto } from '../../mock-tests/dto/attempt-summary.dto';
 import { SprintQuestionItemDto } from './sprint-draft-response.dto';
 
 export class SprintExamRefDto {
@@ -46,6 +47,12 @@ export class SprintTestListItemDto {
   @ApiProperty()
   durationInMinutes: number;
 
+  @ApiProperty({
+    description: 'Total marks (totalQuestions × marksPerQuestion)',
+    example: 40,
+  })
+  totalMarks: number;
+
   @ApiProperty({ type: SprintExamRefDto, nullable: true })
   exam: SprintExamRefDto | null;
 
@@ -81,6 +88,13 @@ export class SprintTestListItemDto {
 
   @ApiPropertyOptional()
   resumeAttemptId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Authenticated-only card snapshot (progress, scores, Mistake Book teaser). Omitted for anonymous lists.',
+    type: AttemptSummaryDto,
+  })
+  attemptSummary?: AttemptSummaryDto;
 
   @ApiPropertyOptional({
     description:

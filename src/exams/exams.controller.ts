@@ -30,7 +30,7 @@ import { ExamsService } from './exams.service';
 import { CreateExamDto } from './dto/create-exam.dto';
 import { UpdateExamDto } from './dto/update-exam.dto';
 import { ExamResponseDto } from './dto/exam-response.dto';
-import { ExamsByCategoryResponseDto } from './dto/exams-by-category-response.dto';
+import { ExamsByCategoryPageDto } from './dto/exams-by-category-response.dto';
 import { PaginationMetaDto } from '../common/dto/api-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -46,81 +46,46 @@ export class ExamsController {
 
   @Get('by-category')
   @ApiOperation({
-    summary: 'Get all exams grouped by category (Public API)',
+    summary: 'Get exams grouped by category (Public API)',
     description: `
-    Retrieves all active exams grouped by their categories.
-    Perfect for landing pages and exam browsing.
-    
-    Features:
-    - Returns array of categories with their exams
-    - Includes all active exams per category
-    - Includes topic-wise mock test counts per exam (full-exam papers are not counted)
-    - Returns all data (no pagination or filtering needed)
-    - Categories are ordered by priority (highest first), then name
-    - No authentication required
-    
-    Response structure: { message: "...", data: [{category1}, {category2}, ...] }
+    Student mocks hub: active categories with showInApp exams.
+    Paginated — default one category per page. Empty categories are omitted.
+    Each exam includes description, statsLabel, and paperCounts by type.
+    Ordered by category priority (highest first), then name.
     `,
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Category page (minimum 1). Default 1.',
+    example: 1,
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Categories per page (minimum 1, maximum 50). Default 1.',
+    example: 1,
   })
   @ApiResponse({
     status: 200,
-    description: 'All exams grouped by category',
-    schema: {
-      type: 'object',
-      properties: {
-        message: {
-          type: 'string',
-          example: 'Exams by category retrieved successfully',
-        },
-        data: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string', example: '64f123...' },
-              name: { type: 'string', example: 'Staff Selection Commission' },
-              shortName: { type: 'string', example: 'SSC' },
-              imageUrl: { type: 'string', example: 'https://...' },
-              description: {
-                type: 'string',
-                example: 'Government recruitment...',
-              },
-              exams: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    id: { type: 'string' },
-                    title: { type: 'string' },
-                    fullName: { type: 'string' },
-                    duration: { type: 'string' },
-                    totalQuestions: { type: 'number' },
-                    totalMarks: { type: 'number' },
-                    testsCount: { type: 'number' },
-                    subjectsCount: { type: 'number' },
-                    trending: {
-                      type: 'boolean',
-                      example: false,
-                      description:
-                        'Whether this exam is trending — nearby, or widely signed up. False when unset.',
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
+    description: 'Exams grouped by category with pagination',
+    type: ExamsByCategoryPageDto,
   })
-  async getExamsByCategory(): Promise<{
+  async getExamsByCategory(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(1), ParseIntPipe) limit: number,
+  ): Promise<{
     message: string;
-    data: ExamsByCategoryResponseDto;
+    data: ExamsByCategoryPageDto['data'];
+    pagination: PaginationMetaDto;
   }> {
-    const data = await this.examsService.getExamsByCategory();
+    const result = await this.examsService.getExamsByCategory(page, limit);
     return {
       message: 'Exams by category retrieved successfully',
-      data,
+      data: result.data,
+      pagination: result.pagination,
     };
   }
 

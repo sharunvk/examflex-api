@@ -41,11 +41,20 @@ describe('ExamsController', () => {
     jest.clearAllMocks();
   });
 
-  it('getExamsByCategory wraps data', async () => {
-    service.getExamsByCategory.mockResolvedValue([]);
-    await expect(controller.getExamsByCategory()).resolves.toEqual({
+  it('getExamsByCategory wraps data and pagination', async () => {
+    const pagination = {
+      total: 0,
+      page: 1,
+      limit: 1,
+      totalPages: 0,
+      hasNextPage: false,
+      hasPrevPage: false,
+    };
+    service.getExamsByCategory.mockResolvedValue({ data: [], pagination });
+    await expect(controller.getExamsByCategory(1, 1)).resolves.toEqual({
       message: 'Exams by category retrieved successfully',
       data: [],
+      pagination,
     });
   });
 

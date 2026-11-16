@@ -77,6 +77,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
       status = HttpStatus.TOO_MANY_REQUESTS;
       message = 'Too many requests. Please try again later.';
       error = 'TooManyRequests';
+    } else if (this.isBsonObjectIdError(exception)) {
+      // `new ObjectId(bad)` throws BSONError — never expose the raw text.
+      // Checked before isMongoError: BSON errors can carry a `code` field.
+      status = HttpStatus.BAD_REQUEST;
+      error = 'InvalidId';
+      message = 'Invalid ID format';
     } else if (this.isMongoError(exception)) {
       // Handle MongoDB errors
       const mongoError = exception as MongoError;
@@ -98,7 +104,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       // Handle invalid ObjectId or type casting errors
       status = HttpStatus.BAD_REQUEST;
       error = 'InvalidId';
-      message = `Invalid ${exception.path}: ${exception.value}`;
+      message = 'Invalid ID format';
     } else if (
       exception instanceof Error &&
       exception.name === 'JsonWebTokenError'
@@ -180,6 +186,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
       (exception.name === 'MongoError' ||
         exception.name === 'MongoServerError' ||
         'code' in exception)
+    );
+  }
+
+  /** BSON ObjectId constructor / parser failures (not Mongoose CastError). */
+  private isBsonObjectIdError(exception: unknown): boolean {
+    if (!(exception instanceof Error)) return false;
+    if (exception.name === 'BSONError' || exception.name === 'BSONTypeError') {
+      return true;
+    }
+    return /24 character hex string|not a valid ObjectId/i.test(
+      exception.message,
     );
   }
 

@@ -213,7 +213,13 @@ QuestionSchema.set('toObject', {
   },
 });
 
-// Pre-find middleware to handle soft delete queries
+// Pre-find middleware to handle soft delete queries.
+// Locked attempt papers pass `{ includeDeleted: true }` so a question soft-deleted
+// after the paper was built still loads for in-progress / resume / start payloads.
 QuestionSchema.pre(/^find/, function (this: Query<unknown, QuestionDocument>) {
+  const options = this.getOptions() as { includeDeleted?: boolean };
+  if (options.includeDeleted === true) {
+    return;
+  }
   this.where({ isDeleted: { $ne: true } });
 });

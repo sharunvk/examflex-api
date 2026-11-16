@@ -308,6 +308,13 @@ export class MockTestsController {
     description: 'Subject ID to filter mock tests by subject',
     example: '64f123456789abcdef123456',
   })
+  @ApiQuery({
+    name: 'topicId',
+    required: false,
+    type: String,
+    description: 'Topic (chapter) ID to filter mock tests',
+    example: '64f123456789abcdef123456',
+  })
   @ApiResponse({
     status: 200,
     description: 'Mock tests retrieved successfully',
@@ -323,6 +330,7 @@ export class MockTestsController {
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
     @Query('search') search?: string,
     @Query('subjectId') subjectId?: string,
+    @Query('topicId') topicId?: string,
     @GetUser() user?: UserResponseDto,
   ): Promise<{
     message: string;
@@ -336,6 +344,7 @@ export class MockTestsController {
       user?.id,
       search,
       subjectId,
+      topicId,
     );
     return {
       message: 'Mock tests for exam retrieved successfully',

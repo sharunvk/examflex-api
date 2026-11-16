@@ -28,11 +28,18 @@ const TOP_ID = '507f1f77bcf86cd799439018';
 
 function chainable(resolved: unknown) {
   const query: any = {};
-  ['populate', 'sort', 'skip', 'limit', 'lean', 'select', 'session'].forEach(
-    m => {
-      query[m] = jest.fn().mockReturnValue(query);
-    },
-  );
+  [
+    'populate',
+    'sort',
+    'skip',
+    'limit',
+    'lean',
+    'select',
+    'session',
+    'setOptions',
+  ].forEach(m => {
+    query[m] = jest.fn().mockReturnValue(query);
+  });
   query.exec = jest.fn().mockResolvedValue(resolved);
   return query;
 }
@@ -360,9 +367,8 @@ describe('MockTestAttemptsService', () => {
       attemptModel.create.mockResolvedValue(
         makeAttempt({ id: ATTEMPT_ID, startedAt: new Date() }),
       );
-      questionModel.find.mockReturnValue(
-        chainable([questionDoc(Q1), questionDoc(Q2, 'b')]),
-      );
+      const lockedQuery = chainable([questionDoc(Q1), questionDoc(Q2, 'b')]);
+      questionModel.find.mockReturnValue(lockedQuery);
 
       const result = await service.startAttempt(
         { mockTestId: TEST_ID },
@@ -375,6 +381,10 @@ describe('MockTestAttemptsService', () => {
       expect(result.mockTestData.sessions).toBeUndefined();
       expect(result.mockTestData.currentSessionIndex).toBeUndefined();
       expect(attemptModel.create).toHaveBeenCalled();
+      // Locked IDs must load even if soft-deleted after the paper was built.
+      expect(lockedQuery.setOptions).toHaveBeenCalledWith({
+        includeDeleted: true,
+      });
       const created = attemptModel.create.mock.calls[0][0];
       expect(created.sessions).toBeUndefined();
       expect(created.questions[0].sessionOrder).toBeUndefined();

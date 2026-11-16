@@ -16,6 +16,7 @@ import {
   MockTestDocument,
 } from '../mock-tests/schemas/mock-test.schema';
 import { MockTestsService } from '../mock-tests/mock-tests.service';
+import { AttemptSummaryDto } from '../mock-tests/dto/attempt-summary.dto';
 import { PaperType } from '../common/enums/paper-type.enum';
 import { AccessMode } from '../common/enums/access-mode.enum';
 import { UserAttemptAction } from '../common/enums/user-attempt-action.enum';
@@ -439,16 +440,12 @@ export class SprintTestsService {
       this.mockTestModel.countDocuments(query).exec(),
     ]);
 
-    let userActions = new Map<
-      string,
-      { action: UserAttemptAction; resumeAttemptId?: string }
-    >();
-    if (userId) {
-      userActions = await this.mockTestsService.getUserAttemptActions(
-        tests.map(test => test._id.toString()),
-        userId,
-      );
-    }
+    const userActions = userId
+      ? await this.mockTestsService.getUserAttemptActions(
+          tests.map(test => test._id.toString()),
+          userId,
+        )
+      : new Map();
 
     const accessMap = await this.buildAccessMap(userId, tests);
     const totalPages = Math.ceil(total / validLimit) || 0;
@@ -460,6 +457,7 @@ export class SprintTestsService {
           entry?.action || UserAttemptAction.START,
           entry?.resumeAttemptId,
           accessMap.get(test._id.toString()),
+          entry?.attemptSummary,
         );
       }),
       pagination: {
@@ -493,6 +491,7 @@ export class SprintTestsService {
 
     let action = UserAttemptAction.START;
     let resumeAttemptId: string | undefined;
+    let attemptSummary = undefined;
     if (userId) {
       const actions = await this.mockTestsService.getUserAttemptActions(
         [test._id.toString()],
@@ -501,6 +500,7 @@ export class SprintTestsService {
       const entry = actions.get(test._id.toString());
       action = entry?.action || UserAttemptAction.START;
       resumeAttemptId = entry?.resumeAttemptId;
+      attemptSummary = entry?.attemptSummary;
     }
 
     const accessMap = await this.buildAccessMap(userId, [test]);
@@ -509,6 +509,7 @@ export class SprintTestsService {
       action,
       resumeAttemptId,
       accessMap.get(test._id.toString()),
+      attemptSummary,
     );
     if (includeQuestions) {
       item.questions = await this.toPublishedQuestions(test);
@@ -1015,16 +1016,20 @@ export class SprintTestsService {
     userAttemptAction: UserAttemptAction,
     resumeAttemptId?: string,
     access?: AccessDto,
+    attemptSummary?: AttemptSummaryDto,
   ): SprintTestListItemDto {
     const examDoc = test.exam as unknown as PopulatedDocument;
+    const totalQuestions = test.totalQuestions ?? 0;
+    const marksPerQuestion = test.marksPerQuestion ?? 0;
     return {
       id: test.id || test._id.toString(),
       accessMode: test.accessMode ?? AccessMode.FREE,
       access: access ?? this.defaultAccessDto(test.accessMode),
       title: test.title,
       description: test.description,
-      totalQuestions: test.totalQuestions,
+      totalQuestions,
       durationInMinutes: test.durationInMinutes,
+      totalMarks: totalQuestions * marksPerQuestion,
       exam: test.exam
         ? {
             id: examDoc?._id?.toString() || test.exam.toString(),
@@ -1032,7 +1037,7 @@ export class SprintTestsService {
             description: examDoc?.description,
           }
         : null,
-      marksPerQuestion: test.marksPerQuestion,
+      marksPerQuestion,
       negativeMarking: test.negativeMarking,
       passingScore: test.passingScore,
       allowRetake: test.allowRetake,
@@ -1043,6 +1048,7 @@ export class SprintTestsService {
       updatedAt: test.updatedAt as Date,
       userAttemptAction,
       resumeAttemptId,
+      attemptSummary,
     };
   }
 

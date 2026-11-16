@@ -570,7 +570,15 @@ describe('SprintTestsService', () => {
       exec: jest.fn().mockResolvedValue(1),
     });
     mockTestsService.getUserAttemptActions.mockResolvedValue(
-      new Map([[TEST_ID, { action: UserAttemptAction.START }]]),
+      new Map([
+        [
+          TEST_ID,
+          {
+            action: UserAttemptAction.START,
+            attemptSummary: { status: 'NONE', attemptCount: 0 },
+          },
+        ],
+      ]),
     );
 
     const result = await service.listPublished(undefined, 1, 10, USER_ID, true);
@@ -578,6 +586,11 @@ describe('SprintTestsService', () => {
       paperType: PaperType.SPRINT,
     });
     expect(result.data[0].userAttemptAction).toBe(UserAttemptAction.START);
+    expect(result.data[0].totalMarks).toBe(10);
+    expect(result.data[0].attemptSummary).toMatchObject({
+      status: 'NONE',
+      attemptCount: 0,
+    });
   });
 
   it('soft-deletes only a sprint paper', async () => {

@@ -1369,7 +1369,17 @@ describe('FullMockTestsService', () => {
         new Map([
           [
             TEST_ID,
-            { action: UserAttemptAction.RESUME, resumeAttemptId: 'a1' },
+            {
+              action: UserAttemptAction.RESUME,
+              resumeAttemptId: 'a1',
+              attemptSummary: {
+                status: 'IN_PROGRESS',
+                activeAttemptId: 'a1',
+                answeredCount: 3,
+                timeRemainingSeconds: 100,
+                attemptCount: 0,
+              },
+            },
           ],
         ]),
       );
@@ -1382,6 +1392,10 @@ describe('FullMockTestsService', () => {
         false,
       );
       expect(result.data[0].userAttemptAction).toBe(UserAttemptAction.RESUME);
+      expect(result.data[0].attemptSummary).toMatchObject({
+        status: 'IN_PROGRESS',
+        answeredCount: 3,
+      });
       expect(query.sort).toHaveBeenCalledWith({
         accessMode: -1,
         createdAt: 1,

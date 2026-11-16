@@ -3,6 +3,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AccessMode } from '../../common/enums/access-mode.enum';
 import { UserAttemptAction } from '../../common/enums/user-attempt-action.enum';
 import { AccessResponseDto } from '../../access/dto/access-response.dto';
+import { AttemptSummaryDto } from './attempt-summary.dto';
 
 export class ExamSummaryDto {
   @ApiProperty({
@@ -122,6 +123,13 @@ export class MockTestListItemDto {
   durationInMinutes: number;
 
   @ApiProperty({
+    description: 'Total marks (totalQuestions × marksPerQuestion)',
+    example: 120,
+  })
+  @Expose()
+  totalMarks: number;
+
+  @ApiProperty({
     description: 'Exam details',
     type: ExamSummaryDto,
   })
@@ -231,6 +239,15 @@ export class MockTestListItemDto {
   })
   @Expose()
   resumeAttemptId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Authenticated-only card snapshot (progress, scores, Mistake Book teaser). Omitted for anonymous lists.',
+    type: AttemptSummaryDto,
+  })
+  @Expose()
+  @Type(() => AttemptSummaryDto)
+  attemptSummary?: AttemptSummaryDto;
 
   // Exclude sensitive fields from response
   @Exclude()

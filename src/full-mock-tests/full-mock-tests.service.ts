@@ -38,6 +38,7 @@ import {
   DraftResponseDto,
   DraftSubjectBlockDto,
 } from './dto/draft-response.dto';
+import { AttemptSummaryDto } from '../mock-tests/dto/attempt-summary.dto';
 import { FullMockTestListItemDto } from './dto/full-mock-test-list-item.dto';
 import { DraftListItemDto } from './dto/draft-list-item.dto';
 import { SafeQuestionDto } from '../mock-test-attempts/dto/start-attempt-response.dto';
@@ -626,30 +627,25 @@ export class FullMockTestsService {
       this.mockTestModel.countDocuments(query).exec(),
     ]);
 
-    let userActions = new Map<
-      string,
-      { action: UserAttemptAction; resumeAttemptId?: string }
-    >();
-    if (userId) {
-      userActions = await this.mockTestsService.getUserAttemptActions(
-        tests.map(t => t._id.toString()),
-        userId,
-      );
-    }
+    const userActions = await (userId
+      ? this.mockTestsService.getUserAttemptActions(
+          tests.map(t => t._id.toString()),
+          userId,
+        )
+      : Promise.resolve(new Map()));
 
     const accessMap = await this.buildAccessMap(userId, tests);
     const totalPages = Math.ceil(total / validLimit) || 0;
 
     return {
       data: tests.map(test => {
-        const entry = userActions.get(test._id.toString()) || {
-          action: UserAttemptAction.START,
-        };
+        const entry = userActions.get(test._id.toString());
         return this.toListItem(
           test,
-          entry.action,
-          entry.resumeAttemptId,
+          entry?.action ?? UserAttemptAction.START,
+          entry?.resumeAttemptId,
           accessMap.get(test._id.toString()),
+          entry?.attemptSummary,
         );
       }),
       pagination: {
@@ -686,6 +682,7 @@ export class FullMockTestsService {
 
     let action = UserAttemptAction.START;
     let resumeAttemptId: string | undefined;
+    let attemptSummary = undefined;
     if (userId) {
       const actions = await this.mockTestsService.getUserAttemptActions(
         [test._id.toString()],
@@ -694,6 +691,7 @@ export class FullMockTestsService {
       const entry = actions.get(test._id.toString());
       action = entry?.action || UserAttemptAction.START;
       resumeAttemptId = entry?.resumeAttemptId;
+      attemptSummary = entry?.attemptSummary;
     }
 
     const accessMap = await this.buildAccessMap(userId, [test]);
@@ -702,6 +700,7 @@ export class FullMockTestsService {
       action,
       resumeAttemptId,
       accessMap.get(test._id.toString()),
+      attemptSummary,
     );
     if (includeQuestions) {
       item.subjects = await this.toPublishedSubjects(test);
@@ -871,6 +870,7 @@ export class FullMockTestsService {
     userAttemptAction: UserAttemptAction,
     resumeAttemptId?: string,
     access?: AccessDto,
+    attemptSummary?: AttemptSummaryDto,
   ): FullMockTestListItemDto {
     const examDoc = test.exam as unknown as PopulatedDocument;
     return {
@@ -913,6 +913,7 @@ export class FullMockTestsService {
       updatedAt: test.updatedAt as Date,
       userAttemptAction,
       resumeAttemptId,
+      attemptSummary,
     };
   }
 

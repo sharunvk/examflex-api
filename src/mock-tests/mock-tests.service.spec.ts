@@ -213,14 +213,26 @@ describe('MockTestsService', () => {
             _id: { toString: () => ATTEMPT_ID },
             mockTest: { toString: () => TEST_ID },
             status: 'PAUSED',
+            startedAt: new Date('2024-01-01T10:00:00.000Z'),
+            durationInMinutes: 10,
+            timeConsumed: 120,
+            questions: [{ selectedOption: 'a' }],
           },
         ]),
       );
 
       const result = await service.findAll(0, 200, '  NEET  ', USER_ID, true);
 
-      expect(result.data[0].userAttemptAction).toBe(UserAttemptAction.RESUME);
-      expect(result.data[0].resumeAttemptId).toBe(ATTEMPT_ID);
+      const adminItem = result.data[0] as unknown as {
+        userAttemptAction: UserAttemptAction;
+        resumeAttemptId?: string;
+        attemptSummary?: { status: string };
+        totalMarks?: number;
+      };
+      expect(adminItem.userAttemptAction).toBe(UserAttemptAction.RESUME);
+      expect(adminItem.resumeAttemptId).toBe(ATTEMPT_ID);
+      expect(adminItem.attemptSummary?.status).toBe('PAUSED');
+      expect(adminItem.totalMarks).toBe(10);
       expect(result.pagination.limit).toBe(100);
       expect(result.pagination.page).toBe(1);
     });
@@ -706,7 +718,18 @@ describe('MockTestsService', () => {
       );
 
       expect(result.data[0].exam?.name).toBe('NEET');
+      expect(result.data[0].totalMarks).toBe(10);
+      expect(result.data[0].attemptSummary?.status).toBe('NONE');
       expect(result.pagination.hasPrevPage).toBe(true);
+    });
+
+    it('omits attemptSummary when anonymous', async () => {
+      mockTestModel.find.mockReturnValue(chainable([makeTest()]));
+
+      const result = await service.findByExam(EXAM_ID);
+
+      expect(result.data[0].attemptSummary).toBeUndefined();
+      expect(result.data[0].totalMarks).toBe(10);
     });
 
     it('lists by exam with default pagination and no topic search', async () => {
@@ -778,6 +801,10 @@ describe('MockTestsService', () => {
             _id: { toString: () => ATTEMPT_ID },
             mockTest: { toString: () => TEST_ID },
             status: 'IN_PROGRESS',
+            startedAt: new Date('2024-01-01T10:00:00.000Z'),
+            durationInMinutes: 10,
+            timeConsumed: 0,
+            questions: [{ selectedOption: 'a' }, {}],
           },
           {
             _id: { toString: () => '507f1f77bcf86cd799439099' },
@@ -793,22 +820,40 @@ describe('MockTestsService', () => {
       );
 
       expect(map.get(TEST_ID)?.action).toBe(UserAttemptAction.RESUME);
+      expect(map.get(TEST_ID)?.attemptSummary.status).toBe('IN_PROGRESS');
+      expect(map.get(TEST_ID)?.attemptSummary.answeredCount).toBe(1);
       expect(map.get(EXAM_ID)?.action).toBe(UserAttemptAction.START);
+      expect(map.get(EXAM_ID)?.attemptSummary.status).toBe('NONE');
     });
 
-    it('should map EXPIRED as RETAKE', async () => {
+    it('should map EXPIRED as RETAKE with completed summary', async () => {
       attemptModel.find.mockReturnValue(
         chainable([
           {
             _id: { toString: () => ATTEMPT_ID },
             mockTest: { toString: () => TEST_ID },
             status: 'EXPIRED',
+            score: 8,
+            timeConsumed: 400,
+            durationInMinutes: 10,
+            startedAt: new Date('2024-01-01T10:00:00.000Z'),
+            questions: [
+              { selectedOption: 'a', isCorrect: true },
+              { selectedOption: 'b', isCorrect: false },
+            ],
           },
         ]),
       );
 
       const map = await service.getUserAttemptActions([TEST_ID], USER_ID);
       expect(map.get(TEST_ID)?.action).toBe(UserAttemptAction.RETAKE);
+      expect(map.get(TEST_ID)?.attemptSummary).toMatchObject({
+        status: 'COMPLETED',
+        attemptCount: 1,
+        bestScore: 8,
+        lastAttemptId: ATTEMPT_ID,
+        lastIncorrectAnswers: 1,
+      });
     });
 
     it('keeps multiple attempts for the same test grouped', async () => {
@@ -818,16 +863,32 @@ describe('MockTestsService', () => {
             _id: { toString: () => ATTEMPT_ID },
             mockTest: { toString: () => TEST_ID },
             status: 'SUBMITTED',
+            score: 5,
+            timeConsumed: 100,
+            durationInMinutes: 10,
+            startedAt: new Date('2024-01-02T10:00:00.000Z'),
+            questions: [{ selectedOption: 'a', isCorrect: true }],
           },
           {
             _id: { toString: () => Q1 },
             mockTest: { toString: () => TEST_ID },
             status: 'EXPIRED',
+            score: 9,
+            timeConsumed: 200,
+            durationInMinutes: 10,
+            startedAt: new Date('2024-01-01T10:00:00.000Z'),
+            questions: [
+              { selectedOption: 'a', isCorrect: true },
+              { selectedOption: 'b', isCorrect: true },
+            ],
           },
         ]),
       );
       const map = await service.getUserAttemptActions([TEST_ID], USER_ID);
       expect(map.get(TEST_ID)?.action).toBe(UserAttemptAction.RETAKE);
+      expect(map.get(TEST_ID)?.attemptSummary.attemptCount).toBe(2);
+      expect(map.get(TEST_ID)?.attemptSummary.bestScore).toBe(9);
+      expect(map.get(TEST_ID)?.attemptSummary.lastAttemptId).toBe(ATTEMPT_ID);
     });
   });
 });

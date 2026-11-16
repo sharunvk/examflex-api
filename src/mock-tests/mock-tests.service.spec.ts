@@ -672,6 +672,16 @@ describe('MockTestsService', () => {
   });
 
   describe('findByExam', () => {
+    it('rejects invalid exam ids before touching Mongo', async () => {
+      await expect(service.findByExam('not-an-id')).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.findByExam('undefined')).rejects.toThrow(
+        /Invalid exam ID/,
+      );
+      expect(mockTestModel.find).not.toHaveBeenCalled();
+    });
+
     it('should return empty when search matches no topics', async () => {
       topicModel.find.mockReturnValue(chainable([]));
 

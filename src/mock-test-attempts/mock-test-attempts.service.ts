@@ -1691,7 +1691,10 @@ export class MockTestAttemptsService {
     hideAnswers: boolean,
   ): Promise<Array<{ aq: AttemptQuestion; question: any }>> {
     const ids = attemptQuestions.map(q => q.question);
-    let query = this.questionModel.find({ _id: { $in: ids } });
+    // Include soft-deleted rows: the attempt already locked these IDs into the paper.
+    let query = this.questionModel
+      .find({ _id: { $in: ids } })
+      .setOptions({ includeDeleted: true });
     if (hideAnswers) {
       query = query.select('-correctAnswer -explanation');
     }

@@ -182,10 +182,19 @@ export class MockTestsService {
     label: string,
   ): Types.ObjectId | undefined {
     if (!value) return undefined;
-    if (!Types.ObjectId.isValid(value)) {
+    return this.requireObjectId(value, label);
+  }
+
+  /** Required route/query ids — never let BSONError leak to clients. */
+  private requireObjectId(value: string, label: string): Types.ObjectId {
+    if (!value || !Types.ObjectId.isValid(value)) {
       throw new BadRequestException(`Invalid ${label}`);
     }
-    return new Types.ObjectId(value);
+    try {
+      return new Types.ObjectId(value);
+    } catch {
+      throw new BadRequestException(`Invalid ${label}`);
+    }
   }
 
   /**
@@ -591,6 +600,11 @@ export class MockTestsService {
     search?: string,
     subjectId?: string,
   ): Promise<PaginatedMockTestListResponseDto> {
+    const examObjectId = this.requireObjectId(examId, 'exam ID');
+    const subjectObjectId = subjectId
+      ? this.requireObjectId(subjectId, 'subject ID')
+      : undefined;
+
     const validPage = Math.max(1, page);
     const validLimit = Math.min(Math.max(1, limit), 100);
     const skip = (validPage - 1) * validLimit;
@@ -598,12 +612,12 @@ export class MockTestsService {
     const query: FilterQuery<MockTestDocument> = {
       ...TOPIC_WISE_FILTER,
       isActive: true,
-      exam: new Types.ObjectId(examId),
+      exam: examObjectId,
     };
 
     // Filter by subject if provided
-    if (subjectId) {
-      query.subject = new Types.ObjectId(subjectId);
+    if (subjectObjectId) {
+      query.subject = subjectObjectId;
     }
 
     // Search by topic name if provided
@@ -695,6 +709,7 @@ export class MockTestsService {
     limit: number = 10,
     userId?: string,
   ): Promise<PaginatedMockTestsResponseDto> {
+    const subjectObjectId = this.requireObjectId(subjectId, 'subject ID');
     const validPage = Math.max(1, page);
     const validLimit = Math.min(Math.max(1, limit), 100);
     const skip = (validPage - 1) * validLimit;
@@ -702,7 +717,7 @@ export class MockTestsService {
     const query: FilterQuery<MockTestDocument> = {
       ...TOPIC_WISE_FILTER,
       isActive: true,
-      subject: new Types.ObjectId(subjectId),
+      subject: subjectObjectId,
     };
 
     const [mockTests, total] = await Promise.all([
@@ -769,6 +784,8 @@ export class MockTestsService {
     limit: number = 10,
     userId?: string,
   ): Promise<PaginatedMockTestsResponseDto> {
+    const examObjectId = this.requireObjectId(examId, 'exam ID');
+    const subjectObjectId = this.requireObjectId(subjectId, 'subject ID');
     const validPage = Math.max(1, page);
     const validLimit = Math.min(Math.max(1, limit), 100);
     const skip = (validPage - 1) * validLimit;
@@ -776,8 +793,8 @@ export class MockTestsService {
     const query: FilterQuery<MockTestDocument> = {
       ...TOPIC_WISE_FILTER,
       isActive: true,
-      exam: new Types.ObjectId(examId),
-      subject: new Types.ObjectId(subjectId),
+      exam: examObjectId,
+      subject: subjectObjectId,
     };
 
     const [mockTests, total] = await Promise.all([

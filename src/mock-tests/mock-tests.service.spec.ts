@@ -13,6 +13,7 @@ import { UserRole } from '../common/enums/user-role.enum';
 import { UserAttemptAction } from '../common/enums/user-attempt-action.enum';
 import { CreateTopicWiseMockTestDto } from './dto/create-topic-wise-mock-test.dto';
 import { ImageUrlResolver } from '../aws/s3/image-url.resolver';
+import { MistakeBookService } from '../mistake-book/mistake-book.service';
 
 const TEST_ID = '507f1f77bcf86cd799439011';
 const EXAM_ID = '507f1f77bcf86cd799439012';
@@ -130,6 +131,9 @@ describe('MockTestsService', () => {
   const imageUrlResolver = {
     resolveMany: jest.fn(async (images: unknown[]) => images.map(() => null)),
   };
+  const mistakeBookService = {
+    countRemainingByMockTests: jest.fn().mockResolvedValue(new Map()),
+  };
   const accessControlService = {
     resolveAccessForMockTests: jest.fn(
       async (
@@ -165,11 +169,13 @@ describe('MockTestsService', () => {
         { provide: getModelToken(Question.name), useValue: questionModel },
         { provide: AccessControlService, useValue: accessControlService },
         { provide: ImageUrlResolver, useValue: imageUrlResolver },
+        { provide: MistakeBookService, useValue: mistakeBookService },
       ],
     }).compile();
 
     service = module.get(MockTestsService);
     jest.clearAllMocks();
+    mistakeBookService.countRemainingByMockTests.mockResolvedValue(new Map());
     mockTestModel.find.mockReset();
     mockTestModel.findOne.mockReset();
     mockTestModel.findOneAndUpdate.mockReset();

@@ -54,16 +54,20 @@ export class MistakeBookController {
     message: string;
     data: MistakeBookSessionsResponseDto['data'];
     pagination: MistakeBookSessionsResponseDto['pagination'];
+    summary: MistakeBookSessionsResponseDto['summary'];
   }> {
     const result = await this.mistakeBookService.listSessions(
       currentUser.id,
       query.page,
       query.limit,
+      query.subjectId,
+      query.topicId,
     );
     return {
       message: 'Mistake Book sessions retrieved successfully',
       data: result.data,
       pagination: result.pagination,
+      summary: result.summary,
     };
   }
 

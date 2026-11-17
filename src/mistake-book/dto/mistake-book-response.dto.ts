@@ -34,21 +34,41 @@ export class MistakeBookSessionDto {
   @ApiPropertyOptional()
   topicLabel?: string;
 
+  @ApiProperty({
+    type: [String],
+    description: 'Distinct subject ids with remaining mistakes on this paper',
+  })
+  subjectIds: string[];
+
   constructor(partial: Partial<MistakeBookSessionDto>) {
     Object.assign(this, partial);
   }
 }
 
-export class MistakeBookSessionsResponseDto {
-  @ApiProperty({ type: [MistakeBookSessionDto] })
-  data: MistakeBookSessionDto[];
+export class MistakeBookSubjectCountDto {
+  @ApiProperty()
+  id: string;
 
-  @ApiProperty({ type: PaginationMetaDto })
-  pagination: PaginationMetaDto;
+  @ApiProperty()
+  label: string;
 
-  constructor(data: MistakeBookSessionDto[], pagination: PaginationMetaDto) {
-    this.data = data;
-    this.pagination = pagination;
+  @ApiProperty({ example: 15 })
+  count: number;
+
+  constructor(partial: Partial<MistakeBookSubjectCountDto>) {
+    Object.assign(this, partial);
+  }
+}
+
+export class MistakeBookStartWithDto {
+  @ApiProperty()
+  mockTestId: string;
+
+  @ApiProperty()
+  title: string;
+
+  constructor(partial: Partial<MistakeBookStartWithDto>) {
+    Object.assign(this, partial);
   }
 }
 
@@ -71,6 +91,62 @@ export class MistakeBookChapterOptionDto extends MistakeBookFilterOptionDto {
   constructor(partial: Partial<MistakeBookChapterOptionDto>) {
     super(partial);
     Object.assign(this, partial);
+  }
+}
+
+export class MistakeBookListSummaryDto {
+  @ApiProperty({ example: 22 })
+  totalMistakes: number;
+
+  @ApiProperty({ example: 4 })
+  sessionCount: number;
+
+  @ApiProperty({ type: [MistakeBookSubjectCountDto] })
+  bySubject: MistakeBookSubjectCountDto[];
+
+  @ApiProperty({
+    type: [MistakeBookFilterOptionDto],
+    description: 'Subjects available for list filters (from remaining entries)',
+  })
+  subjects: MistakeBookFilterOptionDto[];
+
+  @ApiProperty({
+    type: [MistakeBookChapterOptionDto],
+    description: 'Chapters/topics available for list filters',
+  })
+  chapters: MistakeBookChapterOptionDto[];
+
+  @ApiPropertyOptional({
+    type: MistakeBookStartWithDto,
+    nullable: true,
+    description:
+      'Top session in the book (newest attemptSubmittedAt) — matches list order',
+  })
+  startWith: MistakeBookStartWithDto | null;
+
+  constructor(partial: Partial<MistakeBookListSummaryDto>) {
+    Object.assign(this, partial);
+  }
+}
+
+export class MistakeBookSessionsResponseDto {
+  @ApiProperty({ type: [MistakeBookSessionDto] })
+  data: MistakeBookSessionDto[];
+
+  @ApiProperty({ type: PaginationMetaDto })
+  pagination: PaginationMetaDto;
+
+  @ApiProperty({ type: MistakeBookListSummaryDto })
+  summary: MistakeBookListSummaryDto;
+
+  constructor(
+    data: MistakeBookSessionDto[],
+    pagination: PaginationMetaDto,
+    summary: MistakeBookListSummaryDto,
+  ) {
+    this.data = data;
+    this.pagination = pagination;
+    this.summary = summary;
   }
 }
 

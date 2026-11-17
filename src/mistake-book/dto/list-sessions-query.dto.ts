@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsInt, IsMongoId, IsOptional, Max, Min } from 'class-validator';
 import {
   MISTAKE_BOOK_SESSION_PAGE_LIMIT_DEFAULT,
   MISTAKE_BOOK_SESSION_PAGE_LIMIT_MAX,
@@ -25,4 +25,20 @@ export class ListMistakeBookSessionsQueryDto {
   @Min(1)
   @Max(MISTAKE_BOOK_SESSION_PAGE_LIMIT_MAX)
   limit?: number = MISTAKE_BOOK_SESSION_PAGE_LIMIT_DEFAULT;
+
+  @ApiPropertyOptional({
+    description:
+      'When set, only sessions that still have mistakes in this subject are returned. Summary counts stay global.',
+  })
+  @IsOptional()
+  @IsMongoId()
+  subjectId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'When set, only sessions that still have mistakes in this chapter/topic are returned. Summary counts stay global.',
+  })
+  @IsOptional()
+  @IsMongoId()
+  topicId?: string;
 }

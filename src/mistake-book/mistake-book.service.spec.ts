@@ -187,36 +187,237 @@ describe('MistakeBookService', () => {
   });
 
   describe('listSessions', () => {
-    it('returns paginated sessions newest first', async () => {
-      entryModel.aggregate.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([
+    const physicsId = new Types.ObjectId(SUBJECT_ID);
+    const chemId = new Types.ObjectId('507f1f77bcf86cd799439019');
+    const topicId = new Types.ObjectId('507f1f77bcf86cd79943901a');
+
+    function mockListAggregates(options?: {
+      sessionRows?: unknown[];
+      sessionTotal?: number;
+      bySubject?: Array<{ _id: Types.ObjectId | null; count: number }>;
+      chapters?: Array<{
+        _id: Types.ObjectId | null;
+        subject: Types.ObjectId | null;
+      }>;
+      summarySessions?: Array<{
+        _id: Types.ObjectId;
+        title: string;
+        remainingCount: number;
+        attemptSubmittedAt: Date;
+      }>;
+    }) {
+      const sessionFacet = {
+        meta: [
+          { total: options?.sessionTotal ?? options?.sessionRows?.length ?? 0 },
+        ],
+        data: options?.sessionRows ?? [],
+      };
+      const summaryFacet = {
+        bySubject: options?.bySubject ?? [],
+        chapters: options?.chapters ?? [],
+        sessions: options?.summarySessions ?? [],
+      };
+      entryModel.aggregate
+        .mockReturnValueOnce({
+          exec: jest.fn().mockResolvedValue([sessionFacet]),
+        })
+        .mockReturnValueOnce({
+          exec: jest.fn().mockResolvedValue([summaryFacet]),
+        });
+    }
+
+    it('returns paginated sessions with summary and dominant subject', async () => {
+      mockListAggregates({
+        sessionTotal: 1,
+        sessionRows: [
           {
-            meta: [{ total: 1 }],
-            data: [
-              {
-                _id: new Types.ObjectId(MOCK_ID),
-                attemptId: new Types.ObjectId(ATTEMPT_ID),
-                title: 'Mock 12',
-                paperType: PaperType.FULL_EXAM,
-                remainingCount: 2,
-                attemptSubmittedAt: new Date('2026-11-17T10:00:00.000Z'),
-              },
-            ],
+            _id: new Types.ObjectId(MOCK_ID),
+            attemptId: new Types.ObjectId(ATTEMPT_ID),
+            title: 'Kinematics - 1',
+            paperType: PaperType.TOPIC_WISE,
+            remainingCount: 3,
+            attemptSubmittedAt: new Date('2026-11-17T10:00:00.000Z'),
+            subjects: [physicsId, physicsId, chemId],
+            topics: [topicId, topicId, null],
           },
-        ]),
+        ],
+        bySubject: [
+          { _id: physicsId, count: 15 },
+          { _id: chemId, count: 4 },
+        ],
+        chapters: [{ _id: topicId, subject: physicsId }],
+        summarySessions: [
+          {
+            _id: new Types.ObjectId(MOCK_ID),
+            title: 'Kinematics - 1',
+            remainingCount: 9,
+            attemptSubmittedAt: new Date('2026-11-17T10:00:00.000Z'),
+          },
+        ],
       });
+      subjectModel.find.mockReturnValue(
+        chain([
+          { _id: physicsId, name: 'Physics' },
+          { _id: chemId, name: 'Chemistry' },
+        ]),
+      );
+      topicModel.find.mockReturnValue(
+        chain([{ _id: topicId, name: 'Kinematics' }]),
+      );
 
       const result = await service.listSessions(USER_ID, 1, 20);
       expect(result.data).toHaveLength(1);
       expect(result.data[0].mockTestId).toBe(MOCK_ID);
-      expect(result.data[0].remainingCount).toBe(2);
+      expect(result.data[0].subjectId).toBe(SUBJECT_ID);
+      expect(result.data[0].subjectLabel).toBe('Physics');
+      expect(result.data[0].topicLabel).toBe('Kinematics');
+      expect(result.data[0].subjectIds).toEqual([
+        SUBJECT_ID,
+        chemId.toString(),
+      ]);
+      expect(result.summary.totalMistakes).toBe(19);
+      expect(result.summary.sessionCount).toBe(1);
+      expect(result.summary.bySubject).toEqual([
+        { id: SUBJECT_ID, label: 'Physics', count: 15 },
+        { id: chemId.toString(), label: 'Chemistry', count: 4 },
+      ]);
+      expect(result.summary.subjects).toEqual([
+        { id: SUBJECT_ID, label: 'Physics' },
+        { id: chemId.toString(), label: 'Chemistry' },
+      ]);
+      expect(result.summary.chapters).toEqual([
+        {
+          id: topicId.toString(),
+          label: 'Kinematics',
+          subjectId: SUBJECT_ID,
+        },
+      ]);
+      expect(result.summary.startWith).toEqual({
+        mockTestId: MOCK_ID,
+        title: 'Kinematics - 1',
+      });
       expect(result.pagination.total).toBe(1);
+    });
+
+    it('returns an empty summary when the book is empty', async () => {
+      mockListAggregates({
+        sessionTotal: 0,
+        sessionRows: [],
+        bySubject: [],
+        summarySessions: [],
+      });
+
+      const result = await service.listSessions(USER_ID, 1, 20);
+      expect(result.data).toEqual([]);
+      expect(result.summary).toEqual({
+        totalMistakes: 0,
+        sessionCount: 0,
+        bySubject: [],
+        subjects: [],
+        chapters: [],
+        startWith: null,
+      });
+    });
+
+    it('filters sessions by subjectId while keeping a global summary', async () => {
+      mockListAggregates({
+        sessionTotal: 1,
+        sessionRows: [
+          {
+            _id: new Types.ObjectId(MOCK_ID),
+            attemptId: new Types.ObjectId(ATTEMPT_ID),
+            title: 'Physics paper',
+            paperType: PaperType.TOPIC_WISE,
+            remainingCount: 2,
+            attemptSubmittedAt: new Date('2026-11-17T10:00:00.000Z'),
+            subjects: [physicsId, physicsId],
+            topics: [topicId, topicId],
+          },
+        ],
+        bySubject: [
+          { _id: physicsId, count: 15 },
+          { _id: chemId, count: 4 },
+        ],
+        summarySessions: [
+          {
+            _id: new Types.ObjectId(MOCK_ID),
+            title: 'Physics paper',
+            remainingCount: 2,
+            attemptSubmittedAt: new Date('2026-11-17T10:00:00.000Z'),
+          },
+        ],
+      });
+      subjectModel.find.mockReturnValue(
+        chain([
+          { _id: physicsId, name: 'Physics' },
+          { _id: chemId, name: 'Chemistry' },
+        ]),
+      );
+      topicModel.find.mockReturnValue(
+        chain([{ _id: topicId, name: 'Kinematics' }]),
+      );
+
+      const result = await service.listSessions(USER_ID, 1, 20, SUBJECT_ID);
+      expect(result.data).toHaveLength(1);
+      expect(result.summary.totalMistakes).toBe(19);
+      const matchStage = entryModel.aggregate.mock.calls[0][0][0].$match;
+      expect(matchStage.subject.toString()).toBe(SUBJECT_ID);
+    });
+
+    it('filters sessions by topicId', async () => {
+      mockListAggregates({
+        sessionTotal: 1,
+        sessionRows: [
+          {
+            _id: new Types.ObjectId(MOCK_ID),
+            attemptId: new Types.ObjectId(ATTEMPT_ID),
+            title: 'Kinematics paper',
+            paperType: PaperType.TOPIC_WISE,
+            remainingCount: 2,
+            attemptSubmittedAt: new Date('2026-11-17T10:00:00.000Z'),
+            subjects: [physicsId],
+            topics: [topicId],
+          },
+        ],
+        bySubject: [{ _id: physicsId, count: 2 }],
+        summarySessions: [
+          {
+            _id: new Types.ObjectId(MOCK_ID),
+            title: 'Kinematics paper',
+            remainingCount: 2,
+            attemptSubmittedAt: new Date('2026-11-17T10:00:00.000Z'),
+          },
+        ],
+      });
+      subjectModel.find.mockReturnValue(
+        chain([{ _id: physicsId, name: 'Physics' }]),
+      );
+      topicModel.find.mockReturnValue(
+        chain([{ _id: topicId, name: 'Kinematics' }]),
+      );
+
+      await service.listSessions(
+        USER_ID,
+        1,
+        20,
+        SUBJECT_ID,
+        topicId.toString(),
+      );
+      const matchStage = entryModel.aggregate.mock.calls[0][0][0].$match;
+      expect(matchStage.subject.toString()).toBe(SUBJECT_ID);
+      expect(matchStage.topic.toString()).toBe(topicId.toString());
     });
 
     it('rejects invalid user ids', async () => {
       await expect(service.listSessions('bad')).rejects.toBeInstanceOf(
         BadRequestException,
       );
+    });
+
+    it('rejects invalid subject filter ids', async () => {
+      await expect(
+        service.listSessions(USER_ID, 1, 20, 'bad'),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 

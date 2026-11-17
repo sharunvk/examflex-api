@@ -27,9 +27,12 @@ import {
   MistakeBookChapterOptionDto,
   MistakeBookEntryDto,
   MistakeBookFilterOptionDto,
+  MistakeBookListSummaryDto,
   MistakeBookSessionDetailDto,
   MistakeBookSessionDto,
   MistakeBookSessionsResponseDto,
+  MistakeBookStartWithDto,
+  MistakeBookSubjectCountDto,
 } from './dto/mistake-book-response.dto';
 import {
   clampMistakeBookLimit,
@@ -53,8 +56,22 @@ type SessionAggRow = {
   paperType: PaperType;
   remainingCount: number;
   attemptSubmittedAt: Date;
-  subject?: Types.ObjectId;
-  topic?: Types.ObjectId;
+  subjects: Array<Types.ObjectId | null | undefined>;
+  topics: Array<Types.ObjectId | null | undefined>;
+};
+
+type SummaryFacet = {
+  bySubject: Array<{ _id: Types.ObjectId | null; count: number }>;
+  chapters: Array<{
+    _id: Types.ObjectId | null;
+    subject: Types.ObjectId | null;
+  }>;
+  sessions: Array<{
+    _id: Types.ObjectId;
+    title: string;
+    remainingCount: number;
+    attemptSubmittedAt: Date;
+  }>;
 };
 
 @Injectable()
@@ -215,9 +232,17 @@ export class MistakeBookService {
     userId: string,
     page?: number,
     limit?: number,
+    subjectId?: string,
+    topicId?: string,
   ): Promise<MistakeBookSessionsResponseDto> {
     if (!Types.ObjectId.isValid(userId)) {
       throw new BadRequestException('Invalid user ID format');
+    }
+    if (subjectId && !Types.ObjectId.isValid(subjectId)) {
+      throw new BadRequestException('Invalid subject ID format');
+    }
+    if (topicId && !Types.ObjectId.isValid(topicId)) {
+      throw new BadRequestException('Invalid topic ID format');
     }
 
     const safePage = clampMistakeBookPage(page);
@@ -225,8 +250,16 @@ export class MistakeBookService {
     const skip = (safePage - 1) * safeLimit;
     const userObjectId = new Types.ObjectId(userId);
 
-    const pipeline: PipelineStage[] = [
-      { $match: { user: userObjectId } },
+    const sessionMatch: Record<string, unknown> = { user: userObjectId };
+    if (subjectId) {
+      sessionMatch.subject = new Types.ObjectId(subjectId);
+    }
+    if (topicId) {
+      sessionMatch.topic = new Types.ObjectId(topicId);
+    }
+
+    const sessionPipeline: PipelineStage[] = [
+      { $match: sessionMatch },
       {
         $group: {
           _id: '$mockTest',
@@ -235,8 +268,8 @@ export class MistakeBookService {
           paperType: { $first: '$paperType' },
           remainingCount: { $sum: 1 },
           attemptSubmittedAt: { $max: '$attemptSubmittedAt' },
-          subject: { $first: '$subject' },
-          topic: { $first: '$topic' },
+          subjects: { $push: '$subject' },
+          topics: { $push: '$topic' },
         },
       },
       { $sort: { attemptSubmittedAt: -1 } },
@@ -248,57 +281,173 @@ export class MistakeBookService {
       },
     ];
 
-    const [facet] = await this.entryModel
-      .aggregate<{
-        meta: Array<{ total: number }>;
-        data: SessionAggRow[];
-      }>(pipeline)
-      .exec();
+    const summaryPipeline: PipelineStage[] = [
+      { $match: { user: userObjectId } },
+      {
+        $facet: {
+          bySubject: [
+            { $group: { _id: '$subject', count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+          ],
+          chapters: [
+            {
+              $match: {
+                topic: { $ne: null },
+                subject: { $ne: null },
+              },
+            },
+            {
+              $group: {
+                _id: '$topic',
+                subject: { $first: '$subject' },
+              },
+            },
+          ],
+          sessions: [
+            {
+              $group: {
+                _id: '$mockTest',
+                title: { $first: '$mockTitle' },
+                remainingCount: { $sum: 1 },
+                attemptSubmittedAt: { $max: '$attemptSubmittedAt' },
+              },
+            },
+            // Same ordering as the session list: newest attempt first.
+            { $sort: { attemptSubmittedAt: -1 } },
+          ],
+        },
+      },
+    ];
+
+    const [[facet], [summaryFacet]] = await Promise.all([
+      this.entryModel
+        .aggregate<{
+          meta: Array<{ total: number }>;
+          data: SessionAggRow[];
+        }>(sessionPipeline)
+        .exec(),
+      this.entryModel.aggregate<SummaryFacet>(summaryPipeline).exec(),
+    ]);
 
     const total = facet?.meta[0]?.total ?? 0;
     const rows = facet?.data ?? [];
-    const subjectIds = [
-      ...new Set(
-        rows
+    const summaryRows = summaryFacet?.sessions ?? [];
+    const bySubjectRows = summaryFacet?.bySubject ?? [];
+    const chapterRows = summaryFacet?.chapters ?? [];
+
+    const nameIds = [
+      ...new Set([
+        ...rows.flatMap(row =>
+          row.subjects
+            .map(id => id?.toString())
+            .filter((id): id is string => Boolean(id)),
+        ),
+        ...bySubjectRows
+          .map(row => row._id?.toString())
+          .filter((id): id is string => Boolean(id)),
+        ...chapterRows
           .map(row => row.subject?.toString())
           .filter((id): id is string => Boolean(id)),
-      ),
+      ]),
     ];
     const topicIds = [
-      ...new Set(
-        rows
-          .map(row => row.topic?.toString())
+      ...new Set([
+        ...rows.flatMap(row =>
+          row.topics
+            .map(id => id?.toString())
+            .filter((id): id is string => Boolean(id)),
+        ),
+        ...chapterRows
+          .map(row => row._id?.toString())
           .filter((id): id is string => Boolean(id)),
-      ),
+      ]),
     ];
     const [subjects, topics] = await Promise.all([
-      this.loadSubjectNames(subjectIds),
+      this.loadSubjectNames(nameIds),
       this.loadTopicNames(topicIds),
     ]);
 
-    const data = rows.map(
+    const data = rows.map(row => {
+      const subjectIdList = distinctObjectIds(row.subjects);
+      const dominantSubject = dominantObjectId(row.subjects);
+      const dominantTopic = dominantObjectId(row.topics);
+      return new MistakeBookSessionDto({
+        mockTestId: row._id.toString(),
+        attemptId: row.attemptId.toString(),
+        title: row.title,
+        paperType: row.paperType,
+        remainingCount: row.remainingCount,
+        attemptSubmittedAt: row.attemptSubmittedAt,
+        subjectIds: subjectIdList.map(id => id.toString()),
+        ...(dominantSubject
+          ? {
+              subjectId: dominantSubject.toString(),
+              subjectLabel: subjects.get(dominantSubject.toString()),
+            }
+          : {}),
+        ...(dominantTopic
+          ? {
+              topicId: dominantTopic.toString(),
+              topicLabel: topics.get(dominantTopic.toString()),
+            }
+          : {}),
+      });
+    });
+
+    const totalMistakes = bySubjectRows.reduce(
+      (sum, row) => sum + row.count,
+      0,
+    );
+    const bySubject = bySubjectRows
+      .filter((row): row is { _id: Types.ObjectId; count: number } =>
+        Boolean(row._id),
+      )
+      .map(
+        row =>
+          new MistakeBookSubjectCountDto({
+            id: row._id.toString(),
+            label: subjects.get(row._id.toString()) ?? 'Subject',
+            count: row.count,
+          }),
+      );
+    const filterSubjects = bySubject.map(
       row =>
-        new MistakeBookSessionDto({
-          mockTestId: row._id.toString(),
-          attemptId: row.attemptId.toString(),
-          title: row.title,
-          paperType: row.paperType,
-          remainingCount: row.remainingCount,
-          attemptSubmittedAt: row.attemptSubmittedAt,
-          ...(row.subject
-            ? {
-                subjectId: row.subject.toString(),
-                subjectLabel: subjects.get(row.subject.toString()),
-              }
-            : {}),
-          ...(row.topic
-            ? {
-                topicId: row.topic.toString(),
-                topicLabel: topics.get(row.topic.toString()),
-              }
-            : {}),
+        new MistakeBookFilterOptionDto({
+          id: row.id,
+          label: row.label,
         }),
     );
+    const filterChapters = chapterRows
+      .filter(
+        (
+          row,
+        ): row is {
+          _id: Types.ObjectId;
+          subject: Types.ObjectId;
+        } => Boolean(row._id && row.subject),
+      )
+      .map(
+        row =>
+          new MistakeBookChapterOptionDto({
+            id: row._id.toString(),
+            label: topics.get(row._id.toString()) ?? 'Chapter',
+            subjectId: row.subject.toString(),
+          }),
+      );
+    const topSession = summaryRows[0];
+    const summary = new MistakeBookListSummaryDto({
+      totalMistakes,
+      sessionCount: summaryRows.length,
+      bySubject,
+      subjects: filterSubjects,
+      chapters: filterChapters,
+      startWith: topSession
+        ? new MistakeBookStartWithDto({
+            mockTestId: topSession._id.toString(),
+            title: topSession.title,
+          })
+        : null,
+    });
 
     const totalPages = total === 0 ? 0 : Math.ceil(total / safeLimit);
     const pagination: PaginationMetaDto = {
@@ -310,7 +459,7 @@ export class MistakeBookService {
       hasPrevPage: safePage > 1,
     };
 
-    return new MistakeBookSessionsResponseDto(data, pagination);
+    return new MistakeBookSessionsResponseDto(data, pagination, summary);
   }
 
   async getSession(
@@ -628,4 +777,44 @@ export class MistakeBookService {
     }
     return map;
   }
+}
+
+/** Distinct ObjectIds preserving first-seen order. */
+function distinctObjectIds(
+  values: Array<Types.ObjectId | null | undefined>,
+): Types.ObjectId[] {
+  const seen = new Set<string>();
+  const result: Types.ObjectId[] = [];
+  for (const value of values) {
+    if (!value) continue;
+    const key = value.toString();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+  return result;
+}
+
+/** ObjectId with the highest occurrence count (ties keep first max). */
+function dominantObjectId(
+  values: Array<Types.ObjectId | null | undefined>,
+): Types.ObjectId | undefined {
+  const counts = new Map<string, { id: Types.ObjectId; count: number }>();
+  for (const value of values) {
+    if (!value) continue;
+    const key = value.toString();
+    const prev = counts.get(key);
+    if (prev) {
+      prev.count += 1;
+    } else {
+      counts.set(key, { id: value, count: 1 });
+    }
+  }
+  let best: { id: Types.ObjectId; count: number } | undefined;
+  for (const row of counts.values()) {
+    if (!best || row.count > best.count) {
+      best = row;
+    }
+  }
+  return best?.id;
 }

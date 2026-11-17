@@ -33,14 +33,31 @@ describe('MistakeBookController', () => {
         hasNextPage: false,
         hasPrevPage: false,
       },
+      summary: {
+        totalMistakes: 0,
+        sessionCount: 0,
+        bySubject: [],
+        subjects: [],
+        chapters: [],
+        startWith: null,
+      },
     });
 
     const result = await controller.listSessions({ id: 'u1' } as never, {
       page: 1,
       limit: 20,
+      subjectId: '507f1f77bcf86cd799439018',
+      topicId: '507f1f77bcf86cd79943901a',
     });
     expect(result.data).toEqual([]);
-    expect(service.listSessions).toHaveBeenCalledWith('u1', 1, 20);
+    expect(result.summary.totalMistakes).toBe(0);
+    expect(service.listSessions).toHaveBeenCalledWith(
+      'u1',
+      1,
+      20,
+      '507f1f77bcf86cd799439018',
+      '507f1f77bcf86cd79943901a',
+    );
   });
 
   it('gets a session and mutates entries', async () => {

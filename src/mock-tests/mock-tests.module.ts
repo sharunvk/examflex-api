@@ -21,6 +21,7 @@ import {
   QuestionSchema,
 } from '../mock-test-attempts/schemas/question.schema';
 import { AccessModule } from '../access/access-control.module';
+import { MistakeBookModule } from '../mistake-book/mistake-book.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { AccessModule } from '../access/access-control.module';
     TopicsModule,
     ExamsModule,
     forwardRef(() => AccessModule),
+    MistakeBookModule,
   ],
   // Drafts must be registered first. Otherwise GET /mock-tests/:id
   // captures /mock-tests/drafts and Mongoose rejects the id "drafts".

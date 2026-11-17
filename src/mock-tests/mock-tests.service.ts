@@ -46,6 +46,7 @@ import {
   buildEnrichmentsForTests,
 } from './attempt-summary';
 import { AttemptSummaryDto } from './dto/attempt-summary.dto';
+import { MistakeBookService } from '../mistake-book/mistake-book.service';
 
 const TOPIC_WISE_FILTER: FilterQuery<MockTestDocument> = {
   ...TOPIC_WISE_PAPER_MATCH,
@@ -67,6 +68,7 @@ export class MockTestsService {
     @Inject(forwardRef(() => AccessControlService))
     private readonly accessControlService: AccessControlService,
     private readonly imageUrlResolver: ImageUrlResolver,
+    private readonly mistakeBookService: MistakeBookService,
   ) {}
 
   /**
@@ -949,7 +951,21 @@ export class MockTestsService {
       .lean()
       .exec()) as AttemptSummarySource[];
 
-    return buildEnrichmentsForTests(mockTestIds, attempts);
+    const enrichments = buildEnrichmentsForTests(mockTestIds, attempts);
+    const remainingByMock =
+      await this.mistakeBookService.countRemainingByMockTests(
+        userId,
+        mockTestIds,
+      );
+
+    for (const [mockTestId, enrichment] of enrichments) {
+      const remaining = remainingByMock.get(mockTestId) ?? 0;
+      if (remaining > 0) {
+        enrichment.attemptSummary.mistakeBookRemaining = remaining;
+      }
+    }
+
+    return enrichments;
   }
 
   /**

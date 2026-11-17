@@ -103,6 +103,14 @@ export class AttemptSummaryDto {
   @Expose()
   lastIncorrectAnswers?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Open Mistake Book cards for this paper (wrong + unattended still remaining)',
+    example: 4,
+  })
+  @Expose()
+  mistakeBookRemaining?: number;
+
   constructor(partial: Partial<AttemptSummaryDto>) {
     Object.assign(this, partial);
   }

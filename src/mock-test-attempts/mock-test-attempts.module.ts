@@ -10,6 +10,7 @@ import { Question, QuestionSchema } from './schemas/question.schema';
 import { MockTestsModule } from '../mock-tests/mock-tests.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { AccessModule } from '../access/access-control.module';
+import { MistakeBookModule } from '../mistake-book/mistake-book.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { AccessModule } from '../access/access-control.module';
     MockTestsModule, // Import to access MockTest model
     AnalyticsModule, // Import to drop cached analytics when an attempt closes
     AccessModule,
+    MistakeBookModule,
   ],
   controllers: [MockTestAttemptsController],
   providers: [MockTestAttemptsService],

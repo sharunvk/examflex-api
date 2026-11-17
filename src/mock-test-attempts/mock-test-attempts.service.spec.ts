@@ -16,6 +16,7 @@ import { AnalyticsService } from '../analytics/analytics.service';
 import { AccessControlService } from '../access/access-control.service';
 import { AccessDecisionReason } from '../common/enums/access-decision-reason.enum';
 import { AccessMode } from '../common/enums/access-mode.enum';
+import { MistakeBookService } from '../mistake-book/mistake-book.service';
 
 const TEST_ID = '507f1f77bcf86cd799439011';
 const USER_ID = '507f1f77bcf86cd799439012';
@@ -180,6 +181,9 @@ describe('MockTestAttemptsService', () => {
       accessMode: AccessMode.FREE,
     }),
   };
+  const mistakeBookService = {
+    replaceForAttempt: jest.fn().mockResolvedValue(undefined),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -194,6 +198,7 @@ describe('MockTestAttemptsService', () => {
         { provide: ImageUrlResolver, useValue: imageUrlResolver },
         { provide: AnalyticsService, useValue: analyticsService },
         { provide: AccessControlService, useValue: accessControlService },
+        { provide: MistakeBookService, useValue: mistakeBookService },
       ],
     }).compile();
 
@@ -213,6 +218,7 @@ describe('MockTestAttemptsService', () => {
       reason: AccessDecisionReason.ALLOWED,
       accessMode: AccessMode.FREE,
     });
+    mistakeBookService.replaceForAttempt.mockResolvedValue(undefined);
     attemptModel.updateOne.mockReturnValue({
       exec: jest.fn().mockResolvedValue({}),
     });

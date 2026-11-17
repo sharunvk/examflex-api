@@ -36,6 +36,7 @@ import { AnalyticsService } from '../analytics/analytics.service';
 import { mapPerformanceBands } from '../exams/performance-bands';
 import { AccessControlService } from '../access/access-control.service';
 import { AccessDecisionReason } from '../common/enums/access-decision-reason.enum';
+import { MistakeBookService } from '../mistake-book/mistake-book.service';
 
 @Injectable()
 export class MockTestAttemptsService {
@@ -51,6 +52,7 @@ export class MockTestAttemptsService {
     private readonly imageUrlResolver: ImageUrlResolver,
     private readonly analyticsService: AnalyticsService,
     private readonly accessControlService: AccessControlService,
+    private readonly mistakeBookService: MistakeBookService,
   ) {}
 
   /**
@@ -63,6 +65,19 @@ export class MockTestAttemptsService {
     } catch (error) {
       this.logger.warn(
         `Failed to invalidate analytics cache for user ${userId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  /** Sync Mistake Book after a paper closes (wrong + unattended). */
+  private async syncMistakeBook(attemptId: string): Promise<void> {
+    try {
+      await this.mistakeBookService.replaceForAttempt(attemptId);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to sync Mistake Book for attempt ${attemptId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -383,6 +398,7 @@ export class MockTestAttemptsService {
     attempt.submittedAt = new Date();
     await attempt.save();
     await this.refreshAnalytics(attempt.user.toString());
+    await this.syncMistakeBook(attempt.id);
 
     return true;
   }
@@ -1542,6 +1558,7 @@ export class MockTestAttemptsService {
 
     await attempt.save();
     await this.refreshAnalytics(userId);
+    await this.syncMistakeBook(attempt.id);
 
     // Step 9: Prepare response
     const totalPossibleScore = this.getTotalPossibleScore(attempt);

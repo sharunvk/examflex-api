@@ -26,6 +26,7 @@ import { AdminUsersModule } from './admin-users/admin-users.module';
 import { SearchModule } from './search/search.module';
 import { ImportModule } from './imports/import.module';
 import { CurrentAffairsModule } from './current-affairs/current-affairs.module';
+import { EquationBookModule } from './equation-book/equation-book.module';
 import { InstanceConfigModule } from './instance-config/instance-config.module';
 import { ValidationModule } from './common/validators/validation.module';
 import { AwsModule } from './aws/aws.module';
@@ -130,6 +131,7 @@ const observeRootModule = createObserveRootModule();
     SearchModule,
     ImportModule,
     CurrentAffairsModule,
+    EquationBookModule,
     InstanceConfigModule,
     CommerceAuditModule,
     EntitlementsModule,

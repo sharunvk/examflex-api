@@ -13,6 +13,7 @@ import { MockTest } from '../mock-tests/schemas/mock-test.schema';
 import { Question } from './schemas/question.schema';
 import { ImageUrlResolver } from '../aws/s3/image-url.resolver';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { AnalysisService } from '../analysis/analysis.service';
 import { AccessControlService } from '../access/access-control.service';
 import { AccessDecisionReason } from '../common/enums/access-decision-reason.enum';
 import { AccessMode } from '../common/enums/access-mode.enum';
@@ -174,6 +175,9 @@ describe('MockTestAttemptsService', () => {
   const analyticsService = {
     invalidateDashboardCache: jest.fn().mockResolvedValue(undefined),
   };
+  const analysisService = {
+    invalidateUserAnalysis: jest.fn().mockResolvedValue(undefined),
+  };
   const accessControlService = {
     canAccessMockTest: jest.fn().mockResolvedValue({
       allowed: true,
@@ -197,6 +201,7 @@ describe('MockTestAttemptsService', () => {
         { provide: getModelToken(Question.name), useValue: questionModel },
         { provide: ImageUrlResolver, useValue: imageUrlResolver },
         { provide: AnalyticsService, useValue: analyticsService },
+        { provide: AnalysisService, useValue: analysisService },
         { provide: AccessControlService, useValue: accessControlService },
         { provide: MistakeBookService, useValue: mistakeBookService },
       ],
@@ -213,6 +218,7 @@ describe('MockTestAttemptsService', () => {
     questionModel.find.mockReset();
     imageUrlResolver.resolveMany.mockResolvedValue([null, null, null]);
     analyticsService.invalidateDashboardCache.mockResolvedValue(undefined);
+    analysisService.invalidateUserAnalysis.mockResolvedValue(undefined);
     accessControlService.canAccessMockTest.mockResolvedValue({
       allowed: true,
       reason: AccessDecisionReason.ALLOWED,

@@ -33,6 +33,7 @@ import { PopulatedDocument } from '../common/types/populated-document.interface'
 import { knownPaperType } from '../common/enums/paper-type.enum';
 import { ImageLike, ImageUrlResolver } from '../aws/s3/image-url.resolver';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { AnalysisService } from '../analysis/analysis.service';
 import { mapPerformanceBands } from '../exams/performance-bands';
 import { AccessControlService } from '../access/access-control.service';
 import { AccessDecisionReason } from '../common/enums/access-decision-reason.enum';
@@ -51,17 +52,21 @@ export class MockTestAttemptsService {
     private questionModel: Model<QuestionDocument>,
     private readonly imageUrlResolver: ImageUrlResolver,
     private readonly analyticsService: AnalyticsService,
+    private readonly analysisService: AnalysisService,
     private readonly accessControlService: AccessControlService,
     private readonly mistakeBookService: MistakeBookService,
   ) {}
 
   /**
-   * Drop the cached dashboard/activity payloads once an attempt is closed so the
-   * student sees the finished test, and its time, straight away.
+   * Drop the cached dashboard/activity/analysis payloads once an attempt is
+   * closed so the student sees the finished test straight away.
    */
   private async refreshAnalytics(userId: string): Promise<void> {
     try {
-      await this.analyticsService.invalidateDashboardCache(userId);
+      await Promise.all([
+        this.analyticsService.invalidateDashboardCache(userId),
+        this.analysisService.invalidateUserAnalysis(userId),
+      ]);
     } catch (error) {
       this.logger.warn(
         `Failed to invalidate analytics cache for user ${userId}: ${
@@ -534,6 +539,7 @@ export class MockTestAttemptsService {
       totalQuestions: test.totalQuestions,
       durationInMinutes: test.durationInMinutes,
       exam: test.exam,
+      paperType: knownPaperType(test.paperType),
       subject: test.subject,
       topic: test.topic,
       marksPerQuestion: test.marksPerQuestion,

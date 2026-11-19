@@ -69,7 +69,34 @@ describe('buildTodayPage', () => {
     expect(page.nextMock.meta).toContain('180 questions');
     expect(page.equationBook.statusPill).toMatch(/Flip a card/i);
     expect(page.mistakeBook.title).toBe('Mistake Book');
+    expect(page.mistakeBook.statusPill).toMatch(/Fills in after/i);
     expect(page.subjectInsights.items[0]?.scoreLabel).toBe('— / 180');
+  });
+
+  it('shows real Mistake Book stats before a full mock is completed', () => {
+    const page = buildTodayPage({
+      examId: EXAM_ID,
+      analysis: emptyAnalysis({
+        engagement: {
+          hasFullMocks: false,
+          hasChapterWise: true,
+          fullMockTarget: 5,
+          fullMocksRemaining: 5,
+        },
+      }),
+      mistakes: new MistakeBookTeaserDto({
+        totalMistakes: 24,
+        startWith: { mockTestId: 'mt-ch', title: 'Kinematics - 1' },
+      }),
+      nextMock: null,
+    });
+
+    expect(page.mode).toBe('empty');
+    expect(page.mistakeBook.body).toBe(
+      '24 saved questions waiting for a calm look.',
+    );
+    expect(page.mistakeBook.statusPill).toBe('Start with 5 today');
+    expect(page.mistakeBook.ctaHref).toBe('/mistake-book/mt-ch');
   });
 
   it('builds active mode with mistake pickup and subject percents', () => {

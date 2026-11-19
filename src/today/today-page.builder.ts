@@ -56,7 +56,7 @@ export function buildTodayPage(input: {
       ctaHref: '/equation-book',
       statusPill: 'Flip a card. Say it out loud. Then check.',
     },
-    mistakeBook: buildMistakeBook(mode, mistakes),
+    mistakeBook: buildMistakeBook(mistakes),
     nextMock: buildNextMock(nextMock, examId, analysis.exam.name),
     perspective: buildPerspective(mode),
     footerRight:
@@ -279,8 +279,10 @@ function weakestTopicTip(
   return `${weak[0].topicName} needs another look.`;
 }
 
-function buildMistakeBook(mode: TodayMode, mistakes: MistakeBookTeaserDto) {
-  if (mode === 'empty' || mistakes.totalMistakes === 0) {
+function buildMistakeBook(mistakes: MistakeBookTeaserDto) {
+  // Mistake Book copy follows real saved misses — not full-mock "empty" mode.
+  // Chapter-wise / sprint attempts can fill the book before a full mock.
+  if (mistakes.totalMistakes === 0) {
     return {
       eyebrow: 'TURN MISSES INTO MOMENTUM',
       title: 'Mistake Book',

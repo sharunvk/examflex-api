@@ -38,6 +38,7 @@ import { mapPerformanceBands } from '../exams/performance-bands';
 import { AccessControlService } from '../access/access-control.service';
 import { AccessDecisionReason } from '../common/enums/access-decision-reason.enum';
 import { MistakeBookService } from '../mistake-book/mistake-book.service';
+import { TodayService } from '../today/today.service';
 
 @Injectable()
 export class MockTestAttemptsService {
@@ -55,10 +56,11 @@ export class MockTestAttemptsService {
     private readonly analysisService: AnalysisService,
     private readonly accessControlService: AccessControlService,
     private readonly mistakeBookService: MistakeBookService,
+    private readonly todayService: TodayService,
   ) {}
 
   /**
-   * Drop the cached dashboard/activity/analysis payloads once an attempt is
+   * Drop the cached dashboard/activity/analysis/today payloads once an attempt is
    * closed so the student sees the finished test straight away.
    */
   private async refreshAnalytics(userId: string): Promise<void> {
@@ -66,6 +68,7 @@ export class MockTestAttemptsService {
       await Promise.all([
         this.analyticsService.invalidateDashboardCache(userId),
         this.analysisService.invalidateUserAnalysis(userId),
+        this.todayService.invalidateUserToday(userId),
       ]);
     } catch (error) {
       this.logger.warn(

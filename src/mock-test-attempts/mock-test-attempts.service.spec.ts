@@ -18,6 +18,7 @@ import { AccessControlService } from '../access/access-control.service';
 import { AccessDecisionReason } from '../common/enums/access-decision-reason.enum';
 import { AccessMode } from '../common/enums/access-mode.enum';
 import { MistakeBookService } from '../mistake-book/mistake-book.service';
+import { TodayService } from '../today/today.service';
 
 const TEST_ID = '507f1f77bcf86cd799439011';
 const USER_ID = '507f1f77bcf86cd799439012';
@@ -178,6 +179,9 @@ describe('MockTestAttemptsService', () => {
   const analysisService = {
     invalidateUserAnalysis: jest.fn().mockResolvedValue(undefined),
   };
+  const todayService = {
+    invalidateUserToday: jest.fn().mockResolvedValue(undefined),
+  };
   const accessControlService = {
     canAccessMockTest: jest.fn().mockResolvedValue({
       allowed: true,
@@ -204,6 +208,7 @@ describe('MockTestAttemptsService', () => {
         { provide: AnalysisService, useValue: analysisService },
         { provide: AccessControlService, useValue: accessControlService },
         { provide: MistakeBookService, useValue: mistakeBookService },
+        { provide: TodayService, useValue: todayService },
       ],
     }).compile();
 
@@ -219,6 +224,7 @@ describe('MockTestAttemptsService', () => {
     imageUrlResolver.resolveMany.mockResolvedValue([null, null, null]);
     analyticsService.invalidateDashboardCache.mockResolvedValue(undefined);
     analysisService.invalidateUserAnalysis.mockResolvedValue(undefined);
+    todayService.invalidateUserToday.mockResolvedValue(undefined);
     accessControlService.canAccessMockTest.mockResolvedValue({
       allowed: true,
       reason: AccessDecisionReason.ALLOWED,

@@ -12,6 +12,7 @@ import { AnalyticsModule } from '../analytics/analytics.module';
 import { AnalysisModule } from '../analysis/analysis.module';
 import { AccessModule } from '../access/access-control.module';
 import { MistakeBookModule } from '../mistake-book/mistake-book.module';
+import { TodayModule } from '../today/today.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { MistakeBookModule } from '../mistake-book/mistake-book.module';
     MockTestsModule, // Import to access MockTest model
     AnalyticsModule, // Import to drop cached analytics when an attempt closes
     AnalysisModule, // Drop Analysis overview cache when an attempt closes
+    TodayModule, // Drop Today dashboard cache when an attempt closes
     AccessModule,
     MistakeBookModule,
   ],

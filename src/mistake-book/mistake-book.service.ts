@@ -34,6 +34,7 @@ import {
   MistakeBookStartWithDto,
   MistakeBookSubjectCountDto,
 } from './dto/mistake-book-response.dto';
+import { MistakeBookTeaserDto } from './dto/mistake-book-teaser.dto';
 import {
   clampMistakeBookLimit,
   clampMistakeBookPage,
@@ -226,6 +227,59 @@ export class MistakeBookService {
       result.set(row._id.toString(), row.count);
     }
     return result;
+  }
+
+  /**
+   * Minimal Mistake Book stats for the Today dashboard.
+   * Avoids the full listSessions facet (filters, chapters, pagination).
+   */
+  async getTeaserSummary(userId: string): Promise<MistakeBookTeaserDto> {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new BadRequestException('Invalid user ID format');
+    }
+
+    const userObjectId = new Types.ObjectId(userId);
+    const [facet] = await this.entryModel
+      .aggregate<{
+        total: Array<{ count: number }>;
+        topSession: Array<{
+          _id: Types.ObjectId;
+          title: string;
+        }>;
+      }>([
+        { $match: { user: userObjectId } },
+        {
+          $facet: {
+            total: [{ $count: 'count' }],
+            topSession: [
+              {
+                $group: {
+                  _id: '$mockTest',
+                  title: { $first: '$mockTitle' },
+                  attemptSubmittedAt: { $max: '$attemptSubmittedAt' },
+                },
+              },
+              { $sort: { attemptSubmittedAt: -1 } },
+              { $limit: 1 },
+              { $project: { _id: 1, title: 1 } },
+            ],
+          },
+        },
+      ])
+      .exec();
+
+    const totalMistakes = facet?.total[0]?.count ?? 0;
+    const top = facet?.topSession[0];
+
+    return new MistakeBookTeaserDto({
+      totalMistakes,
+      startWith: top
+        ? new MistakeBookStartWithDto({
+            mockTestId: top._id.toString(),
+            title: top.title,
+          })
+        : null,
+    });
   }
 
   async listSessions(

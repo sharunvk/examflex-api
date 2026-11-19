@@ -89,6 +89,46 @@ describe('MistakeBookService', () => {
     imageUrlResolver.resolveMany.mockResolvedValue([]);
   });
 
+  describe('getTeaserSummary', () => {
+    it('returns totalMistakes and startWith from a lean facet', async () => {
+      entryModel.aggregate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue([
+          {
+            total: [{ count: 19 }],
+            topSession: [
+              {
+                _id: new Types.ObjectId(MOCK_ID),
+                title: 'Mock 12',
+              },
+            ],
+          },
+        ]),
+      });
+
+      const result = await service.getTeaserSummary(USER_ID);
+      expect(result).toEqual({
+        totalMistakes: 19,
+        startWith: { mockTestId: MOCK_ID, title: 'Mock 12' },
+      });
+      expect(entryModel.aggregate).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns zeros when the book is empty', async () => {
+      entryModel.aggregate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue([{ total: [], topSession: [] }]),
+      });
+
+      const result = await service.getTeaserSummary(USER_ID);
+      expect(result).toEqual({ totalMistakes: 0, startWith: null });
+    });
+
+    it('rejects invalid user ids', async () => {
+      await expect(service.getTeaserSummary('bad')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+  });
+
   describe('replaceForAttempt', () => {
     it('replaces entries with incorrect and unattended only', async () => {
       const attempt = {

@@ -52,6 +52,10 @@ describe('buildTodayPage', () => {
     expect(page.overview.eyebrow).toMatch(/WELCOME/i);
     expect(page.nextStep.showPath).toBe(true);
     expect(page.nextStep.ctaLabel).toMatch(/first mock/i);
+    expect(page.nextStep.body).toMatch(/Mistake Book for calm review/i);
+    expect(page.nextStep.body).not.toMatch(/Equation Book/i);
+    expect(page.nextStep.ctaHref).toBe(`/mocks/exam/${EXAM_ID}/full-mocks`);
+    expect(page.nextMock.ctaHref).toBe(`/mocks/exam/${EXAM_ID}/full-mocks`);
     expect(page.sessionPlan.steps.map(s => s.state)).toEqual([
       'active',
       'locked',
@@ -239,7 +243,7 @@ describe('buildTodayPage', () => {
       nextMock: null,
     });
 
-    expect(page.nextStep.ctaHref).toContain('/mocks/exam/');
+    expect(page.nextStep.ctaHref).toBe(`/mocks/exam/${EXAM_ID}/full-mocks`);
     expect(page.sessionPlan.steps.map(s => s.state)).toEqual([
       'done',
       'done',

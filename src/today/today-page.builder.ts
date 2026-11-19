@@ -92,9 +92,9 @@ function buildNextStep(
     return {
       eyebrow: 'START HERE',
       title: 'Your first step is one mock.',
-      body: 'Take a full-syllabus mock. We turn every miss into your Mistake Book, your Equation Book and a score you can read.',
+      body: 'Take a full-syllabus mock. Misses land in your Mistake Book for calm review, and you get a score you can build on.',
       ctaLabel: 'Take your first mock  →',
-      ctaHref: `/mocks/exam/${examId}`,
+      ctaHref: `/mocks/exam/${examId}/full-mocks`,
       aside: 'Small start. Real progress.',
       showPath: true,
     };
@@ -120,7 +120,7 @@ function buildNextStep(
     title: 'Your next step is another mock.',
     body: 'A fresh full-syllabus attempt updates your score, Mistake Book, and Analysis pathways.',
     ctaLabel: 'View mocks  →',
-    ctaHref: `/mocks/exam/${examId}`,
+    ctaHref: `/mocks/exam/${examId}/full-mocks`,
     aside: 'Small start. Real progress.',
     showPath: false,
   };
@@ -319,7 +319,7 @@ function buildNextMock(
       title: teaser.title || `${examName} full-syllabus mock`,
       meta: `${teaser.totalQuestions} questions  ·  ${teaser.durationInMinutes} minutes`,
       ctaLabel: 'View mocks  →',
-      ctaHref: `/mocks/exam/${examId}`,
+      ctaHref: `/mocks/exam/${examId}/full-mocks`,
     };
   }
 
@@ -328,7 +328,7 @@ function buildNextMock(
     title: `${examName} full-syllabus mock`,
     meta: 'Full syllabus mock',
     ctaLabel: 'View mocks  →',
-    ctaHref: `/mocks/exam/${examId}`,
+    ctaHref: `/mocks/exam/${examId}/full-mocks`,
   };
 }
 

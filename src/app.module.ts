@@ -29,6 +29,7 @@ import { CurrentAffairsModule } from './current-affairs/current-affairs.module';
 import { EquationBookModule } from './equation-book/equation-book.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
 import { AnalysisModule } from './analysis/analysis.module';
+import { TodayModule } from './today/today.module';
 import { InstanceConfigModule } from './instance-config/instance-config.module';
 import { ValidationModule } from './common/validators/validation.module';
 import { AwsModule } from './aws/aws.module';
@@ -136,6 +137,7 @@ const observeRootModule = createObserveRootModule();
     EquationBookModule,
     RecommendationsModule,
     AnalysisModule,
+    TodayModule,
     InstanceConfigModule,
     CommerceAuditModule,
     EntitlementsModule,

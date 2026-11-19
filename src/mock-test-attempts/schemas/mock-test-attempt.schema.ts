@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { PaperType } from '../../common/enums/paper-type.enum';
 
 export type MockTestAttemptDocument = MockTestAttempt & Document;
 
@@ -150,6 +151,17 @@ export class MockTestAttempt {
   @Prop({ type: Types.ObjectId, ref: 'Exam' })
   exam: Types.ObjectId;
 
+  /**
+   * Frozen from the paper at start so analysis can filter FULL_EXAM /
+   * TOPIC_WISE / SPRINT without joining mocktests.
+   */
+  @Prop({
+    type: String,
+    enum: Object.values(PaperType),
+    index: true,
+  })
+  paperType?: PaperType;
+
   @Prop({ type: Types.ObjectId, ref: 'Subject' })
   subject: Types.ObjectId;
 
@@ -230,6 +242,15 @@ MockTestAttemptSchema.index({ user: 1, mockTest: 1 });
 
 // Analytics-optimized index: covers all per-user dashboard aggregation $match stages
 MockTestAttemptSchema.index({ user: 1, status: 1, submittedAt: -1 });
+
+// Analysis overview: last N full mocks / chapter-wise by exam
+MockTestAttemptSchema.index({
+  user: 1,
+  exam: 1,
+  paperType: 1,
+  status: 1,
+  submittedAt: -1,
+});
 
 // Virtual for id field (removes _id and adds id)
 MockTestAttemptSchema.virtual('id').get(function () {

@@ -58,8 +58,8 @@ describe('buildTodayPage', () => {
     expect(page.nextMock.ctaHref).toBe(`/mocks/exam/${EXAM_ID}/full-mocks`);
     expect(page.sessionPlan.steps.map(s => s.state)).toEqual([
       'active',
-      'locked',
-      'locked',
+      'active',
+      'active',
     ]);
     expect(page.latestMock.score).toBeNull();
     expect(page.latestMock.placeholderMessage).toMatch(/lands here/i);
@@ -196,12 +196,14 @@ describe('buildTodayPage', () => {
     expect(page.subjectInsights.items[0].tip).toMatch(/friction/i);
     expect(page.perspective.locked).toBe(false);
     expect(page.perspective.ctaLabel).toMatch(/Analysis/i);
-    expect(page.sessionPlan.steps[0].state).toBe('done');
-    expect(page.sessionPlan.steps[1].state).toBe('active');
-    expect(page.sessionPlan.steps[2].state).toBe('locked');
+    expect(page.sessionPlan.steps.map(s => s.state)).toEqual([
+      'active',
+      'active',
+      'active',
+    ]);
   });
 
-  it('unlocks equation step when active with no remaining mistakes', () => {
+  it('keeps all session steps active when there are no remaining mistakes', () => {
     const analysis = emptyAnalysis({
       fullMocks: {
         completedCount: 1,
@@ -245,8 +247,8 @@ describe('buildTodayPage', () => {
 
     expect(page.nextStep.ctaHref).toBe(`/mocks/exam/${EXAM_ID}/full-mocks`);
     expect(page.sessionPlan.steps.map(s => s.state)).toEqual([
-      'done',
-      'done',
+      'active',
+      'active',
       'active',
     ]);
   });

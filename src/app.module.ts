@@ -7,6 +7,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './users/users.module';
 import { FeedbackModule } from './feedback/feedback.module';
+import { CounselingModule } from './counseling/counseling.module';
 import { AuthModule } from './auth/auth.module';
 import { MockTestsModule } from './mock-tests/mock-tests.module';
 import { MockTestAttemptsModule } from './mock-test-attempts/mock-test-attempts.module';
@@ -115,6 +116,7 @@ const observeRootModule = createObserveRootModule();
     ValidationModule,
     UsersModule,
     FeedbackModule,
+    CounselingModule,
     AuthModule,
     MockTestsModule,
     MockTestAttemptsModule,

@@ -105,6 +105,13 @@ class AttemptQuestionDto {
 }
 
 class TestMetadataDto {
+  @ApiPropertyOptional({
+    description:
+      'Id of the mock test (paper) this attempt belongs to. Used to deep-link to the Mistake Book session for the paper.',
+    example: '64f123456789abcdef123456',
+  })
+  mockTestId?: string;
+
   @ApiProperty({ description: 'Mock test title' })
   title: string;
 

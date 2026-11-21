@@ -769,6 +769,40 @@ describe('MockTestAttemptsService', () => {
       );
     });
 
+    it('exposes the paper id so the results page can deep-link to the Mistake Book', async () => {
+      // populated reference (as findOne loads it)
+      attemptModel.findOne.mockReturnValue(
+        chainable(
+          makeAttempt({
+            mockTest: {
+              _id: new Types.ObjectId(TEST_ID),
+              paperType: 'TOPIC_WISE',
+            },
+          }),
+        ),
+      );
+      questionModel.find.mockReturnValue(chainable([questionDoc(Q1)]));
+      expect((await service.findOne(ATTEMPT_ID, USER_ID)).test.mockTestId).toBe(
+        TEST_ID,
+      );
+
+      // plain ObjectId reference
+      attemptModel.findOne.mockReturnValue(
+        chainable(makeAttempt({ mockTest: new Types.ObjectId(TEST_ID) })),
+      );
+      expect((await service.findOne(ATTEMPT_ID, USER_ID)).test.mockTestId).toBe(
+        TEST_ID,
+      );
+
+      // nothing to point at -> field omitted, no error
+      attemptModel.findOne.mockReturnValue(
+        chainable(makeAttempt({ mockTest: null })),
+      );
+      expect(
+        (await service.findOne(ATTEMPT_ID, USER_ID)).test.mockTestId,
+      ).toBeUndefined();
+    });
+
     it('should return in-progress details with remaining time', async () => {
       attemptModel.findOne.mockReturnValue(chainable(makeAttempt()));
       questionModel.find.mockReturnValue(chainable([questionDoc(Q1)]));

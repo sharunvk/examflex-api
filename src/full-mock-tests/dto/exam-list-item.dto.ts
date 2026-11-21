@@ -1,5 +1,19 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+export class FullMockExamSubjectDto {
+  @ApiProperty({ description: 'Subject id (use in difficultyDistribution)' })
+  subjectId: string;
+
+  @ApiProperty({ example: 'QUANTITATIVE APTITUDE' })
+  name: string;
+
+  @ApiProperty({
+    description: 'exam.subjects[].numberOfQuestions for this subject',
+    example: 25,
+  })
+  numberOfQuestions: number;
+}
+
 export class FullMockExamListItemDto {
   @ApiProperty({
     description: 'Exam ID to send to POST /full-mock-tests/drafts',
@@ -55,6 +69,13 @@ export class FullMockExamListItemDto {
     type: [String],
   })
   subjects: string[];
+
+  @ApiProperty({
+    description:
+      'Same order as `subjects`, with ids and per-subject question quotas. Used by the admin app to build the easy/medium/hard split before generating.',
+    type: [FullMockExamSubjectDto],
+  })
+  subjectDetails: FullMockExamSubjectDto[];
 
   @ApiProperty({
     description: 'Derived from exam.isSessionWise',

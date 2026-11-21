@@ -9,6 +9,10 @@ import {
   QuestionDocument,
 } from '../mock-test-attempts/schemas/question.schema';
 import { DraftQuestion } from './schemas/full-mock-test-draft.schema';
+import { SubjectDifficultyDto } from './dto/create-draft.dto';
+
+export type DifficultyLevel = 'easy' | 'medium' | 'hard';
+const DIFFICULTY_LEVELS: DifficultyLevel[] = ['easy', 'medium', 'hard'];
 
 const RECENCY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 const USAGE_EXPONENT = 1.5;
@@ -50,8 +54,15 @@ export class FullMockSelectionService {
    * Validate exam blueprint then sample a full paper.
    * Throws 400 with BLUEPRINT_INVALID or BANK_SHORTAGE — nothing is persisted here.
    */
-  async generatePaper(exam: ExamDocument): Promise<GeneratedPaper> {
+  async generatePaper(
+    exam: ExamDocument,
+    difficultyDistribution?: SubjectDifficultyDto[],
+  ): Promise<GeneratedPaper> {
     this.assertBlueprint(exam);
+
+    const explicit = difficultyDistribution?.length
+      ? await this.prepareExplicitDistribution(exam, difficultyDistribution)
+      : null;
 
     const usedIds = new Set<string>();
     const questions: DraftQuestion[] = [];
@@ -87,7 +98,25 @@ export class FullMockSelectionService {
         ? row.negativeMarksPerQuestion || 0
         : 0;
 
-      const picks = await this.sampleSubject(row, subject, usedIds, exam._id);
+      const split = explicit?.get(subjectId.toString());
+      const picks: EligibleQuestion[] = [];
+      if (split) {
+        for (const level of DIFFICULTY_LEVELS) {
+          if (split[level] <= 0) {
+            continue;
+          }
+          picks.push(
+            ...(await this.sampleSubject(row, subject, usedIds, exam._id, {
+              difficulty: level,
+              needed: split[level],
+            })),
+          );
+        }
+      } else {
+        picks.push(
+          ...(await this.sampleSubject(row, subject, usedIds, exam._id)),
+        );
+      }
 
       for (const pick of picks) {
         questions.push({
@@ -128,6 +157,131 @@ export class FullMockSelectionService {
     }
 
     return { questions, subjectNames };
+  }
+
+  /**
+   * Validate the admin's per-subject easy/medium/hard split against the exam
+   * blueprint, then check the bank can serve every (subject, difficulty) cell.
+   * Collects ALL problems so the admin can fix them in one pass.
+   * Returns the split keyed by subject id. Persists nothing.
+   */
+  private async prepareExplicitDistribution(
+    exam: ExamDocument,
+    distribution: SubjectDifficultyDto[],
+  ): Promise<Map<string, Record<DifficultyLevel, number>>> {
+    const names = new Map<string, string>();
+    for (const row of exam.subjects) {
+      const id = (row.subject as Types.ObjectId).toString();
+      const subject = await this.subjectModel.findById(id).exec();
+      names.set(id, subject?.name || id);
+    }
+    const label = (id: string) => names.get(id) || id;
+
+    const problems: Array<Record<string, unknown>> = [];
+    const split = new Map<string, Record<DifficultyLevel, number>>();
+
+    for (const entry of distribution) {
+      if (!names.has(entry.subjectId)) {
+        problems.push({
+          rule: 'UNKNOWN_SUBJECT',
+          subjectId: entry.subjectId,
+          message: `Subject ${entry.subjectId} is not part of this exam`,
+        });
+        continue;
+      }
+      if (split.has(entry.subjectId)) {
+        problems.push({
+          rule: 'DUPLICATE_SUBJECT',
+          subjectId: entry.subjectId,
+          subjectName: label(entry.subjectId),
+          message: `${label(entry.subjectId)} was listed more than once`,
+        });
+        continue;
+      }
+      split.set(entry.subjectId, {
+        easy: entry.easy,
+        medium: entry.medium,
+        hard: entry.hard,
+      });
+    }
+
+    for (const row of exam.subjects) {
+      const id = (row.subject as Types.ObjectId).toString();
+      const picked = split.get(id);
+      if (!picked) {
+        problems.push({
+          rule: 'SUBJECT_MISSING',
+          subjectId: id,
+          subjectName: label(id),
+          message: `${label(id)} needs an easy/medium/hard split`,
+        });
+        continue;
+      }
+      const sum = picked.easy + picked.medium + picked.hard;
+      if (sum !== row.numberOfQuestions) {
+        problems.push({
+          rule: 'SUBJECT_TOTAL_MISMATCH',
+          subjectId: id,
+          subjectName: label(id),
+          expected: row.numberOfQuestions,
+          actual: sum,
+          message: `${label(id)}: easy + medium + hard is ${sum} but the exam needs ${row.numberOfQuestions}`,
+        });
+      }
+    }
+
+    if (problems.length > 0) {
+      throw new BadRequestException({
+        message: `Difficulty split is invalid. ${problems
+          .map(p => p.message)
+          .join('; ')}`,
+        error: 'DIFFICULTY_DISTRIBUTION_INVALID',
+        details: problems,
+      });
+    }
+
+    const shortages: Array<Record<string, unknown>> = [];
+    for (const row of exam.subjects) {
+      const id = (row.subject as Types.ObjectId).toString();
+      const picked = split.get(id) as Record<DifficultyLevel, number>;
+      for (const level of DIFFICULTY_LEVELS) {
+        const needed = picked[level];
+        if (needed <= 0) {
+          continue;
+        }
+        // exam.subjects[].subject can hydrate as a string; the question
+        // collection stores real ObjectIds and raw string filters match nothing.
+        const available = await this.countEligible(
+          new Types.ObjectId(id),
+          null,
+          new Set(),
+          exam._id,
+          level,
+        );
+        if (available < needed) {
+          shortages.push({
+            subjectId: id,
+            subjectName: label(id),
+            difficulty: level,
+            needed,
+            available,
+            message: `${label(id)} – ${level}: need ${needed}, only ${available} available`,
+          });
+        }
+      }
+    }
+
+    if (shortages.length > 0) {
+      throw new BadRequestException({
+        message: `Not enough questions for the chosen difficulty split. ${shortages
+          .map(s => s.message)
+          .join('; ')}`,
+        error: 'BANK_SHORTAGE',
+        details: shortages,
+      });
+    }
+
+    return split;
   }
 
   assertBlueprint(exam: Exam): void {
@@ -203,8 +357,10 @@ export class FullMockSelectionService {
     subject: SubjectDocument,
     usedIds: Set<string>,
     examId: Types.ObjectId,
+    scope: { difficulty?: DifficultyLevel; needed?: number } = {},
   ): Promise<EligibleQuestion[]> {
-    const needed = row.numberOfQuestions;
+    const needed = scope.needed ?? row.numberOfQuestions;
+    const { difficulty } = scope;
     const subjectId = subject._id as Types.ObjectId;
 
     const topicIds = (subject.topics || []).map(id => id as Types.ObjectId);
@@ -230,6 +386,7 @@ export class FullMockSelectionService {
                 null,
                 usedIds,
                 examId,
+                difficulty,
               ),
               quota: 0,
               frac: 0,
@@ -243,6 +400,7 @@ export class FullMockSelectionService {
                 topic._id as Types.ObjectId,
                 usedIds,
                 examId,
+                difficulty,
               ),
               quota: 0,
               frac: 0,
@@ -277,6 +435,7 @@ export class FullMockSelectionService {
         bucket.topicId,
         usedIds,
         examId,
+        difficulty,
       );
       const sample = this.weightedSample(pool, bucket.quota);
       if (sample.length < bucket.quota) {
@@ -305,12 +464,13 @@ export class FullMockSelectionService {
     topicId: Types.ObjectId | null,
     usedIds: Set<string>,
     examId: Types.ObjectId,
+    difficulty?: DifficultyLevel,
   ) {
     const match: Record<string, unknown> = {
       subject: subjectId,
       exams: examId,
       isActive: true,
-      difficultyLevel: { $in: ['easy', 'medium', 'hard'] },
+      difficultyLevel: difficulty ?? { $in: DIFFICULTY_LEVELS },
     };
     if (topicId) {
       match.topic = topicId;
@@ -328,9 +488,12 @@ export class FullMockSelectionService {
     topicId: Types.ObjectId | null,
     usedIds: Set<string>,
     examId: Types.ObjectId,
+    difficulty?: DifficultyLevel,
   ): Promise<number> {
     return this.questionModel
-      .countDocuments(this.eligibleMatch(subjectId, topicId, usedIds, examId))
+      .countDocuments(
+        this.eligibleMatch(subjectId, topicId, usedIds, examId, difficulty),
+      )
       .exec();
   }
 
@@ -339,9 +502,10 @@ export class FullMockSelectionService {
     topicId: Types.ObjectId | null,
     usedIds: Set<string>,
     examId: Types.ObjectId,
+    difficulty?: DifficultyLevel,
   ): Promise<EligibleQuestion[]> {
     const docs = await this.questionModel
-      .find(this.eligibleMatch(subjectId, topicId, usedIds, examId))
+      .find(this.eligibleMatch(subjectId, topicId, usedIds, examId, difficulty))
       .select(
         '_id topic difficultyLevel fullMockUsageCount lastUsedInFullMockAt',
       )

@@ -238,6 +238,160 @@ describe('FullMockSelectionService', () => {
     });
   });
 
+  describe('generatePaper with explicit difficulty split', () => {
+    const physics = () =>
+      chainable({
+        _id: new Types.ObjectId(SUB_ID),
+        name: 'Physics',
+        topics: [],
+      });
+
+    const captureError = async (fn: () => Promise<unknown>) => {
+      try {
+        await fn();
+      } catch (e) {
+        return e as BadRequestException;
+      }
+      throw new Error('expected rejection');
+    };
+
+    it('rejects a split that does not sum to the subject quota, naming the subject', async () => {
+      subjectModel.findById.mockReturnValue(physics());
+      const err = await captureError(() =>
+        service.generatePaper(exam(), [
+          { subjectId: SUB_ID, easy: 1, medium: 0, hard: 0 },
+        ]),
+      );
+      const body = err.getResponse() as any;
+      expect(body.error).toBe('DIFFICULTY_DISTRIBUTION_INVALID');
+      expect(body.message).toContain('Physics');
+      expect(body.details[0]).toMatchObject({
+        rule: 'SUBJECT_TOTAL_MISMATCH',
+        expected: 2,
+        actual: 1,
+      });
+      expect(questionModel.find).not.toHaveBeenCalled();
+    });
+
+    it('rejects missing, unknown and duplicate subjects', async () => {
+      subjectModel.findById.mockReturnValue(physics());
+      const other = '507f1f77bcf86cd799439099';
+      const err = await captureError(() =>
+        service.generatePaper(exam(), [
+          { subjectId: other, easy: 1, medium: 1, hard: 0 },
+        ]),
+      );
+      const rules = (err.getResponse() as any).details.map((d: any) => d.rule);
+      expect(rules).toEqual(['UNKNOWN_SUBJECT', 'SUBJECT_MISSING']);
+
+      const dup = await captureError(() =>
+        service.generatePaper(exam(), [
+          { subjectId: SUB_ID, easy: 1, medium: 1, hard: 0 },
+          { subjectId: SUB_ID, easy: 2, medium: 0, hard: 0 },
+        ]),
+      );
+      expect((dup.getResponse() as any).details[0].rule).toBe(
+        'DUPLICATE_SUBJECT',
+      );
+    });
+
+    it('reports every subject/difficulty shortage with names and counts', async () => {
+      subjectModel.findById.mockReturnValue(physics());
+      questionModel.countDocuments.mockImplementation((match: any) => ({
+        exec: jest
+          .fn()
+          .mockResolvedValue(match.difficultyLevel === 'hard' ? 0 : 5),
+      }));
+      const err = await captureError(() =>
+        service.generatePaper(exam(), [
+          { subjectId: SUB_ID, easy: 0, medium: 1, hard: 1 },
+        ]),
+      );
+      const body = err.getResponse() as any;
+      expect(body.error).toBe('BANK_SHORTAGE');
+      expect(body.details).toEqual([
+        expect.objectContaining({
+          subjectName: 'Physics',
+          difficulty: 'hard',
+          needed: 1,
+          available: 0,
+        }),
+      ]);
+      expect(body.message).toContain('Physics – hard: need 1, only 0');
+      expect(questionModel.find).not.toHaveBeenCalled();
+    });
+
+    it('samples each difficulty separately and filters the query by it', async () => {
+      subjectModel.findById.mockReturnValue(physics());
+      questionModel.countDocuments.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(5),
+      });
+      questionModel.find.mockImplementation((match: any) =>
+        chainable([
+          {
+            _id: new Types.ObjectId(match.difficultyLevel === 'easy' ? Q1 : Q2),
+            difficultyLevel: match.difficultyLevel,
+          },
+        ]),
+      );
+
+      const paper = await service.generatePaper(exam(), [
+        { subjectId: SUB_ID, easy: 1, medium: 1, hard: 0 },
+      ]);
+
+      expect(paper.questions.map(q => q.difficultyLevel)).toEqual([
+        'easy',
+        'medium',
+      ]);
+      const levels = questionModel.find.mock.calls.map(
+        (c: any[]) => c[0].difficultyLevel,
+      );
+      expect(levels).toEqual(['easy', 'medium']);
+    });
+
+    it('counts with real ObjectIds even when the exam row hydrates the subject as a string', async () => {
+      // Regression: string subject filters match nothing in the questions
+      // collection, which made every cell report "only 0 available".
+      subjectModel.findById.mockReturnValue(physics());
+      questionModel.countDocuments.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(0),
+      });
+      const stringSubjectExam = exam({
+        subjects: [{ ...exam().subjects[0], subject: SUB_ID }],
+      });
+
+      await captureError(() =>
+        service.generatePaper(stringSubjectExam, [
+          { subjectId: SUB_ID, easy: 2, medium: 0, hard: 0 },
+        ]),
+      );
+
+      const filter = questionModel.countDocuments.mock.calls[0][0];
+      expect(filter.subject).toBeInstanceOf(Types.ObjectId);
+      expect(filter.subject.toString()).toBe(SUB_ID);
+    });
+
+    it('keeps legacy behaviour when no split is sent', async () => {
+      subjectModel.findById.mockReturnValue(physics());
+      questionModel.countDocuments.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(5),
+      });
+      questionModel.find.mockReturnValue(
+        chainable([
+          { _id: new Types.ObjectId(Q1), difficultyLevel: 'easy' },
+          { _id: new Types.ObjectId(Q2), difficultyLevel: 'hard' },
+        ]),
+      );
+      const paper = await service.generatePaper(exam());
+      expect(paper.questions).toHaveLength(2);
+      expect(questionModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          difficultyLevel: { $in: ['easy', 'medium', 'hard'] },
+        }),
+      );
+    });
+  });
+
   describe('allocateLargestRemainder', () => {
     it('should no-op on empty inventory', () => {
       const buckets = [{ topicId: null, inventory: 0, quota: 0, frac: 0 }];

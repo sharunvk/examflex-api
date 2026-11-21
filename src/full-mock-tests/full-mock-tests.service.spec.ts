@@ -254,6 +254,9 @@ describe('FullMockTestsService', () => {
       expect(result.data[0].examName).toBe('CGL');
       expect(result.data[0].mode).toBe('Mixed');
       expect(result.data[0].subjects).toEqual(['GS']);
+      expect(result.data[0].subjectDetails).toEqual([
+        expect.objectContaining({ subjectId: SUB_ID, name: 'GS' }),
+      ]);
     });
 
     it('should skip subject lookup when none present', async () => {
@@ -308,6 +311,43 @@ describe('FullMockTestsService', () => {
       const result = await service.createDraft({ examId: EXAM_ID }, USER_ID);
       expect(result.id).toBe(DRAFT_ID);
       expect(result.subjects[0].questions[0]._id).toBe(Q1);
+    });
+
+    it('forwards an explicit difficulty split to the selection service', async () => {
+      const exam = makeExam();
+      examModel.findById.mockReturnValue(chainable(exam));
+      selectionService.generatePaper.mockResolvedValue({
+        questions: makeDraft().questions,
+        subjectNames: new Map([[SUB_ID, 'GS']]),
+      });
+      draftModel.create.mockResolvedValue(makeDraft());
+      questionModel.find.mockReturnValue(chainable([questionLean()]));
+      const split = [{ subjectId: SUB_ID, easy: 1, medium: 0, hard: 0 }];
+
+      await service.createDraft(
+        { examId: EXAM_ID, difficultyDistribution: split },
+        USER_ID,
+      );
+
+      expect(selectionService.generatePaper).toHaveBeenCalledWith(exam, split);
+    });
+
+    it('passes no split when the admin did not send one', async () => {
+      const exam = makeExam();
+      examModel.findById.mockReturnValue(chainable(exam));
+      selectionService.generatePaper.mockResolvedValue({
+        questions: makeDraft().questions,
+        subjectNames: new Map([[SUB_ID, 'GS']]),
+      });
+      draftModel.create.mockResolvedValue(makeDraft());
+      questionModel.find.mockReturnValue(chainable([questionLean()]));
+
+      await service.createDraft({ examId: EXAM_ID }, USER_ID);
+
+      expect(selectionService.generatePaper).toHaveBeenCalledWith(
+        exam,
+        undefined,
+      );
     });
 
     it('should persist session-wise questions in exam subject order', async () => {

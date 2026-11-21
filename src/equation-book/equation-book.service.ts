@@ -9,17 +9,28 @@ import {
   createdByFields,
   updatedByFields,
 } from '../common/types/to-actor-object-id';
+import { AwsConfigService } from '../aws/config/aws.config';
+import { ImageUrlResolver } from '../aws/s3/image-url.resolver';
+import {
+  assertAllowedBucket,
+  assertSafeImageKey,
+} from '../aws/s3/s3-access.util';
 import { Exam, ExamDocument } from '../exams/schemas/exam.schema';
+import { ImageMetadataDto } from '../questions/dto/image-metadata.dto';
 import { Subject, SubjectDocument } from '../subjects/schemas/subject.schema';
 import { Topic, TopicDocument } from '../topics/schemas/topic.schema';
 import { CreateEquationDto } from './dto/create-equation.dto';
 import {
+  EquationImageDto,
   EquationNamedRefDto,
   EquationResponseDto,
   PaginatedEquationsResponseDto,
 } from './dto/equation-response.dto';
 import { UpdateEquationDto } from './dto/update-equation.dto';
 import { Equation, EquationDocument } from './schemas/equation.schema';
+
+/** `toObject()` adds the virtual `id` on top of the stored fields. */
+type EquationObject = Equation & { id?: string };
 
 @Injectable()
 export class EquationBookService {
@@ -30,6 +41,8 @@ export class EquationBookService {
     private readonly subjectModel: Model<SubjectDocument>,
     @InjectModel(Topic.name) private readonly topicModel: Model<TopicDocument>,
     @InjectModel(Exam.name) private readonly examModel: Model<ExamDocument>,
+    private readonly awsConfig: AwsConfigService,
+    private readonly imageUrlResolver: ImageUrlResolver,
   ) {}
 
   async create(
@@ -37,6 +50,7 @@ export class EquationBookService {
     actorUserId?: string,
   ): Promise<EquationResponseDto> {
     await this.assertCatalogRefs(dto.subject, dto.topic, dto.exams);
+    const image = this.sanitizeImage(dto.image);
 
     const equation = new this.equationModel({
       title: dto.title.trim(),
@@ -48,6 +62,7 @@ export class EquationBookService {
       subject: new Types.ObjectId(dto.subject),
       topic: new Types.ObjectId(dto.topic),
       exams: dto.exams.map(id => new Types.ObjectId(id)),
+      ...(image ? { image } : {}),
       ...createdByFields(actorUserId),
     });
 
@@ -63,7 +78,7 @@ export class EquationBookService {
       throw new NotFoundException('Equation not found after create');
     }
 
-    return this.toResponseDto(populated);
+    return this.toResponseDto(populated, true);
   }
 
   async findAll(
@@ -75,6 +90,7 @@ export class EquationBookService {
       topicId?: string;
       search?: string;
     } = {},
+    includeImageMetadata = false,
   ): Promise<PaginatedEquationsResponseDto> {
     const validPage = Math.max(1, page);
     const validLimit = Math.min(Math.max(1, limit), 100);
@@ -111,7 +127,7 @@ export class EquationBookService {
     const totalPages = Math.ceil(total / validLimit) || 0;
 
     return {
-      data: rows.map(row => this.toResponseDto(row)),
+      data: await this.toResponseDtos(rows, includeImageMetadata),
       pagination: {
         total,
         page: validPage,
@@ -123,7 +139,10 @@ export class EquationBookService {
     };
   }
 
-  async findOne(id: string): Promise<EquationResponseDto> {
+  async findOne(
+    id: string,
+    includeImageMetadata = false,
+  ): Promise<EquationResponseDto> {
     const equation = await this.equationModel
       .findById(id)
       .populate('subject', 'name')
@@ -135,7 +154,7 @@ export class EquationBookService {
       throw new NotFoundException(`Equation with ID "${id}" not found`);
     }
 
-    return this.toResponseDto(equation);
+    return this.toResponseDto(equation, includeImageMetadata);
   }
 
   async update(
@@ -175,6 +194,10 @@ export class EquationBookService {
     if (dto.bulletPoints !== undefined) {
       updateData.bulletPoints = this.normalizeBulletPoints(dto.bulletPoints);
     }
+    // undefined = leave as is; null / empty = remove; metadata = replace
+    if (dto.image !== undefined) {
+      updateData.image = this.sanitizeImage(dto.image);
+    }
     if (dto.subject) updateData.subject = new Types.ObjectId(dto.subject);
     if (dto.topic) updateData.topic = new Types.ObjectId(dto.topic);
     if (dto.exams) {
@@ -192,7 +215,7 @@ export class EquationBookService {
       throw new NotFoundException(`Equation with ID "${id}" not found`);
     }
 
-    return this.toResponseDto(updated);
+    return this.toResponseDto(updated, true);
   }
 
   async remove(id: string, actorUserId?: string): Promise<{ message: string }> {
@@ -255,6 +278,26 @@ export class EquationBookService {
     }
   }
 
+  /** Same rules as question images: allowed key prefix + image bucket only. */
+  private sanitizeImage(
+    image?: ImageMetadataDto | null,
+  ): Omit<ImageMetadataDto, 'url'> | null {
+    if (!image?.key || !image.bucket) {
+      return null;
+    }
+    return {
+      key: assertSafeImageKey(image.key),
+      bucket: assertAllowedBucket(
+        image.bucket,
+        this.awsConfig.allowedImageBuckets,
+      ),
+      region: image.region || this.awsConfig.region,
+      contentType: image.contentType,
+      size: image.size,
+      lastModified: image.lastModified,
+    };
+  }
+
   private normalizeBulletPoints(points?: string[]): string[] {
     if (!points) return [];
     return points.map(point => point.trim()).filter(Boolean);
@@ -277,8 +320,42 @@ export class EquationBookService {
     return id;
   }
 
-  private toResponseDto(equation: EquationDocument): EquationResponseDto {
-    const obj = equation.toObject();
+  private async toResponseDto(
+    equation: EquationDocument,
+    includeImageMetadata: boolean,
+  ): Promise<EquationResponseDto> {
+    const [dto] = await this.toResponseDtos([equation], includeImageMetadata);
+    return dto;
+  }
+
+  /** Signs every picture in one batch so list pages stay cheap. */
+  private async toResponseDtos(
+    equations: EquationDocument[],
+    includeImageMetadata: boolean,
+  ): Promise<EquationResponseDto[]> {
+    const objects = equations.map(
+      equation => equation.toObject() as EquationObject,
+    );
+    const urls = await this.imageUrlResolver.resolveMany(
+      objects.map(obj => obj.image),
+    );
+
+    return equations.map((equation, index) =>
+      this.buildResponse(
+        equation,
+        objects[index],
+        urls[index],
+        includeImageMetadata,
+      ),
+    );
+  }
+
+  private buildResponse(
+    equation: EquationDocument,
+    obj: EquationObject,
+    imageUrl: string | null | undefined,
+    includeImageMetadata: boolean,
+  ): EquationResponseDto {
     const subject = this.toNamedRef(obj.subject);
     const topic = this.toNamedRef(obj.topic);
     const exams = Array.isArray(obj.exams)
@@ -286,6 +363,8 @@ export class EquationBookService {
           .map(exam => this.toNamedRef(exam))
           .filter((exam): exam is EquationNamedRefDto | string => Boolean(exam))
       : [];
+    const image = obj.image as EquationImageDto | null | undefined;
+    const hasImage = Boolean(image?.key && image.bucket);
 
     return {
       id: obj.id || equation._id.toString(),
@@ -295,6 +374,19 @@ export class EquationBookService {
       longDescription: obj.longDescription,
       mnemonic: obj.mnemonic,
       bulletPoints: Array.isArray(obj.bulletPoints) ? obj.bulletPoints : [],
+      ...(hasImage ? { imageUrl: imageUrl ?? null } : {}),
+      ...(hasImage && includeImageMetadata && image
+        ? {
+            image: {
+              key: image.key,
+              bucket: image.bucket,
+              region: image.region,
+              contentType: image.contentType,
+              size: image.size,
+              lastModified: image.lastModified,
+            },
+          }
+        : {}),
       subject: subject ?? '',
       topic: topic ?? '',
       exams,

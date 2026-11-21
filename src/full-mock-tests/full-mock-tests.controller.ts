@@ -37,6 +37,7 @@ import { PaginationMetaDto } from '../common/dto/api-response.dto';
 import { FullMockTestsService } from './full-mock-tests.service';
 import { CreateDraftDto } from './dto/create-draft.dto';
 import { PublishDraftDto } from './dto/publish-draft.dto';
+import { UpdateCourseCutoffsDto } from './dto/course-cutoff.dto';
 import { ReplaceQuestionDto } from './dto/replace-question.dto';
 import { FullMockExamListItemDto } from './dto/exam-list-item.dto';
 import { DraftResponseDto } from './dto/draft-response.dto';
@@ -579,6 +580,54 @@ Take-test: \`POST /mock-test-attempts/start\` or \`GET /mock-test-attempts/{id}/
     return {
       message: 'Full mock test retrieved successfully',
       data: test,
+    };
+  }
+
+  @Patch(':id/course-cutoffs')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Set or clear course cut-offs on a published full mock (Admin)',
+    description: `
+Upserts per-course cut-off marks (absolute marks on the paper's scale) on a
+published \`FULL_EXAM\` paper. A number sets/replaces the cut-off for that course;
+\`null\` removes it; courses not listed keep their stored value.
+
+**Only \`courseCutoffs\` (and the audit actor) are written.** Questions, marks,
+timers and every other field of the published paper are untouched.
+
+Each course must be an active \`COURSE\` of the paper's exam, and the cut-off
+must be > 0 and <= the paper's total marks. Student Analysis picks the change up
+within the analysis cache TTL (5 minutes).
+    `,
+  })
+  @ApiParam({ name: 'id', description: 'Published full mock test ID' })
+  @ApiOkResponse({
+    description: 'Updated full mock test (admin view, includes courseCutoffs)',
+    type: FullMockTestListItemDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Invalid id, duplicate course, unknown/inactive/other-exam course, or cut-off out of range',
+  })
+  @ApiNotFoundResponse({ description: 'Not a published FULL_EXAM paper' })
+  @ApiForbiddenResponse({ description: 'Admin role required' })
+  async updateCourseCutoffs(
+    @Param('id') id: string,
+    @Body() dto: UpdateCourseCutoffsDto,
+    @GetUser() user: UserResponseDto,
+  ): Promise<{
+    message: string;
+    data: FullMockTestListItemDto;
+  }> {
+    const data = await this.fullMockTestsService.updateCourseCutoffs(
+      id,
+      dto,
+      user.id,
+    );
+    return {
+      message: 'Course cut-offs updated successfully',
+      data,
     };
   }
 }

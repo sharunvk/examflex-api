@@ -51,14 +51,14 @@ export class RecommendationOffering {
   @Prop({ trim: true, maxlength: 1000 })
   description?: string;
 
-  /** Minimum score percent (0–100) for this pathway. */
-  @Prop({ required: true, min: 0, max: 100 })
-  minPercent: number;
-
   /**
-   * Optional comfort threshold percent. When omitted, analysis uses min + 10pp.
-   * Must be >= minPercent when set.
+   * @deprecated Legacy threshold. Pathways now compare against per-mock cut-off
+   * marks (MockTest.courseCutoffs). Kept optional so old rows stay valid.
    */
+  @Prop({ min: 0, max: 100 })
+  minPercent?: number;
+
+  /** @deprecated Legacy comfort threshold; see minPercent. */
   @Prop({ min: 0, max: 100 })
   comfortPercent?: number;
 

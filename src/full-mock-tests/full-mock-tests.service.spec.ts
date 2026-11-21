@@ -8,6 +8,8 @@ import { Subject } from '../subjects/schemas/subject.schema';
 import { Question } from '../mock-test-attempts/schemas/question.schema';
 import { MockTest } from '../mock-tests/schemas/mock-test.schema';
 import { FullMockTestDraft } from './schemas/full-mock-test-draft.schema';
+import { RecommendationOffering } from '../recommendations/schemas/recommendation-offering.schema';
+import { RecommendationKind } from '../recommendations/enums/recommendation-kind.enum';
 import { FullMockSelectionService } from './full-mock-selection.service';
 import { MockTestsService } from '../mock-tests/mock-tests.service';
 import { ImageUrlResolver } from '../aws/s3/image-url.resolver';
@@ -24,6 +26,10 @@ const DRAFT_ID = '507f1f77bcf86cd799439015';
 const USER_ID = '507f1f77bcf86cd799439016';
 const TEST_ID = '507f1f77bcf86cd799439017';
 const TOP_ID = '507f1f77bcf86cd799439018';
+const OFF_A = '507f1f77bcf86cd7994390a1';
+const OFF_B = '507f1f77bcf86cd7994390b2';
+const OFF_C = '507f1f77bcf86cd7994390c3';
+const OTHER_EXAM_ID = '507f1f77bcf86cd7994390e4';
 
 function chainable(resolved: unknown) {
   const query: any = {};
@@ -146,6 +152,7 @@ describe('FullMockTestsService', () => {
     updateOne: jest.fn(),
     countDocuments: jest.fn(),
   };
+  const offeringModel: any = { find: jest.fn() };
   const realSelection = new FullMockSelectionService(
     null as any,
     null as any,
@@ -200,6 +207,10 @@ describe('FullMockTestsService', () => {
         { provide: getModelToken(Subject.name), useValue: subjectModel },
         { provide: getModelToken(Question.name), useValue: questionModel },
         { provide: getModelToken(MockTest.name), useValue: mockTestModel },
+        {
+          provide: getModelToken(RecommendationOffering.name),
+          useValue: offeringModel,
+        },
         {
           provide: getModelToken(FullMockTestDraft.name),
           useValue: draftModel,
@@ -1521,6 +1532,522 @@ describe('FullMockTestsService', () => {
       mockTestModel.findOne.mockReturnValue(chainable(published));
       const one = await service.findOnePublished(TEST_ID);
       expect(one.id).toBe(TEST_ID);
+    });
+  });
+
+  describe('course cut-offs', () => {
+    const offering = (id: string, overrides: Record<string, unknown> = {}) => ({
+      _id: new Types.ObjectId(id),
+      kind: RecommendationKind.COURSE,
+      isActive: true,
+      exam: new Types.ObjectId(EXAM_ID),
+      ...overrides,
+    });
+
+    const arrange = () => {
+      const draft = makeDraft();
+      draftModel.findOneAndUpdate.mockResolvedValue(draft);
+      questionModel.find.mockReturnValue(chainable([questionLean()]));
+      mockTestModel.create.mockResolvedValue({
+        id: TEST_ID,
+        _id: new Types.ObjectId(TEST_ID),
+      });
+      questionModel.updateMany.mockResolvedValue({});
+      return draft;
+    };
+
+    const expectCode = async (promise: Promise<unknown>, code: string) => {
+      await expect(promise).rejects.toBeInstanceOf(BadRequestException);
+      await expect(promise).rejects.toMatchObject({
+        response: { error: code },
+      });
+    };
+
+    describe('publish', () => {
+      it('persists the cut-offs on the created full mock', async () => {
+        arrange();
+        offeringModel.find.mockReturnValue(
+          chainable([offering(OFF_A), offering(OFF_B)]),
+        );
+
+        await service.publishDraft(
+          DRAFT_ID,
+          {
+            courseCutoffs: [
+              { offeringId: OFF_A, cutoffMarks: 1.5 },
+              { offeringId: OFF_B, cutoffMarks: 2 },
+            ],
+          },
+          USER_ID,
+        );
+
+        const payload = mockTestModel.create.mock.calls[0][0];
+        expect(payload.courseCutoffs).toEqual([
+          { offering: new Types.ObjectId(OFF_A), cutoffMarks: 1.5 },
+          { offering: new Types.ObjectId(OFF_B), cutoffMarks: 2 },
+        ]);
+      });
+
+      it('leaves courseCutoffs off the document when none are sent', async () => {
+        arrange();
+        await service.publishDraft(DRAFT_ID, { title: 'Plain' }, USER_ID);
+        const payload = mockTestModel.create.mock.calls[0][0];
+        expect(payload).not.toHaveProperty('courseCutoffs');
+        expect(offeringModel.find).not.toHaveBeenCalled();
+
+        mockTestModel.create.mockClear();
+        arrange();
+        await service.publishDraft(DRAFT_ID, { courseCutoffs: [] }, USER_ID);
+        expect(mockTestModel.create.mock.calls[0][0]).not.toHaveProperty(
+          'courseCutoffs',
+        );
+      });
+
+      it('derives the allowed maximum from the subjects when totalMarks is missing', async () => {
+        const draft = arrange();
+        draft.examSnapshot.totalMarks = undefined as unknown as number;
+        offeringModel.find.mockReturnValue(chainable([offering(OFF_A)]));
+
+        await service.publishDraft(
+          DRAFT_ID,
+          { courseCutoffs: [{ offeringId: OFF_A, cutoffMarks: 2 }] },
+          USER_ID,
+        ); // 1 question x 2 marks = 2
+
+        expect(mockTestModel.create).toHaveBeenCalled();
+      });
+
+      it.each([
+        [
+          'an unknown course',
+          () => offeringModel.find.mockReturnValue(chainable([])),
+          1,
+          'COURSE_NOT_FOUND',
+        ],
+        [
+          'a course of a different exam',
+          () =>
+            offeringModel.find.mockReturnValue(
+              chainable([
+                offering(OFF_A, { exam: new Types.ObjectId(OTHER_EXAM_ID) }),
+              ]),
+            ),
+          1,
+          'COURSE_NOT_ELIGIBLE',
+        ],
+        [
+          'an inactive course',
+          () =>
+            offeringModel.find.mockReturnValue(
+              chainable([offering(OFF_A, { isActive: false })]),
+            ),
+          1,
+          'COURSE_NOT_ELIGIBLE',
+        ],
+        [
+          'an INSTITUTION offering',
+          () =>
+            offeringModel.find.mockReturnValue(
+              chainable([
+                offering(OFF_A, { kind: RecommendationKind.INSTITUTION }),
+              ]),
+            ),
+          1,
+          'COURSE_NOT_ELIGIBLE',
+        ],
+        [
+          'a cut-off above the paper total',
+          () =>
+            offeringModel.find.mockReturnValue(chainable([offering(OFF_A)])),
+          2.01,
+          'CUTOFF_OUT_OF_RANGE',
+        ],
+        [
+          'a non-positive cut-off',
+          () =>
+            offeringModel.find.mockReturnValue(chainable([offering(OFF_A)])),
+          0,
+          'CUTOFF_OUT_OF_RANGE',
+        ],
+      ])(
+        'rejects %s and rolls the draft back',
+        async (_label, setup, marks, code) => {
+          arrange();
+          setup();
+          await expectCode(
+            service.publishDraft(
+              DRAFT_ID,
+              { courseCutoffs: [{ offeringId: OFF_A, cutoffMarks: marks }] },
+              USER_ID,
+            ),
+            code,
+          );
+          expect(mockTestModel.create).not.toHaveBeenCalled();
+          expect(questionModel.updateMany).not.toHaveBeenCalled();
+          expect(draftModel.updateOne).toHaveBeenCalled(); // back to REVIEW
+        },
+      );
+
+      it('rejects the same course twice', async () => {
+        arrange();
+        await expectCode(
+          service.publishDraft(
+            DRAFT_ID,
+            {
+              courseCutoffs: [
+                { offeringId: OFF_A, cutoffMarks: 1 },
+                { offeringId: OFF_A, cutoffMarks: 2 },
+              ],
+            },
+            USER_ID,
+          ),
+          'DUPLICATE_COURSE_CUTOFF',
+        );
+        expect(mockTestModel.create).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('updateCourseCutoffs', () => {
+      const existingTest = (overrides: Record<string, unknown> = {}) => ({
+        _id: new Types.ObjectId(TEST_ID),
+        exam: new Types.ObjectId(EXAM_ID),
+        totalMarks: 2,
+        subjectConfig: [],
+        courseCutoffs: [
+          { offering: new Types.ObjectId(OFF_A), cutoffMarks: 1 },
+          { offering: new Types.ObjectId(OFF_B), cutoffMarks: 1.2 },
+        ],
+        ...overrides,
+      });
+
+      const updatedDoc = (cutoffs: Array<[string, number]>) => ({
+        id: TEST_ID,
+        _id: { toString: () => TEST_ID },
+        title: 'Full',
+        totalQuestions: 1,
+        durationInMinutes: 60,
+        totalMarks: 2,
+        isSessionWise: false,
+        exam: {
+          _id: { toString: () => EXAM_ID },
+          name: 'CGL',
+          toString: () => EXAM_ID,
+        },
+        subjectConfig: [],
+        marksPerQuestion: 2,
+        negativeMarking: 0.5,
+        allowRetake: true,
+        shuffleOptions: false,
+        showResultsImmediately: true,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        courseCutoffs: cutoffs.map(([id, cutoffMarks]) => ({
+          offering: { toString: () => id },
+          cutoffMarks,
+        })),
+      });
+
+      it('rejects a malformed id and non-full-mock / missing papers', async () => {
+        await expect(
+          service.updateCourseCutoffs('bad', { courseCutoffs: [] }),
+        ).rejects.toThrow(BadRequestException);
+
+        mockTestModel.findOne.mockReturnValue(chainable(null));
+        await expect(
+          service.updateCourseCutoffs(TEST_ID, { courseCutoffs: [] }),
+        ).rejects.toThrow(NotFoundException);
+        expect(mockTestModel.findOne).toHaveBeenCalledWith({
+          _id: TEST_ID,
+          paperType: 'FULL_EXAM',
+        });
+      });
+
+      it('merges edits and writes ONLY courseCutoffs and the audit actor', async () => {
+        mockTestModel.findOne.mockReturnValue(chainable(existingTest()));
+        offeringModel.find.mockReturnValue(
+          chainable([offering(OFF_A), offering(OFF_C)]),
+        );
+        mockTestModel.findOneAndUpdate = jest.fn().mockReturnValue(
+          chainable(
+            updatedDoc([
+              [OFF_A, 2],
+              [OFF_C, 1.1],
+            ]),
+          ),
+        );
+
+        const result = await service.updateCourseCutoffs(
+          TEST_ID,
+          {
+            courseCutoffs: [
+              { offeringId: OFF_A, cutoffMarks: 2 }, // update
+              { offeringId: OFF_B, cutoffMarks: null }, // remove
+              { offeringId: OFF_C, cutoffMarks: 1.1 }, // add
+            ],
+          },
+          USER_ID,
+        );
+
+        const [filter, update, options] =
+          mockTestModel.findOneAndUpdate.mock.calls[0];
+        expect(filter).toEqual({ _id: TEST_ID, paperType: 'FULL_EXAM' });
+        // frozen snapshot guard: nothing but these two keys may be written
+        expect(Object.keys(update)).toEqual(['$set']);
+        expect(Object.keys(update.$set).sort()).toEqual([
+          'courseCutoffs',
+          'updatedBy',
+        ]);
+        expect(update.$set.courseCutoffs).toEqual([
+          { offering: new Types.ObjectId(OFF_A), cutoffMarks: 2 },
+          { offering: new Types.ObjectId(OFF_C), cutoffMarks: 1.1 },
+        ]);
+        expect(options).toEqual({ new: true });
+        // only the courses being SET are looked up
+        const lookedUp = offeringModel.find.mock.calls[0][0]._id.$in.map(
+          (id: Types.ObjectId) => id.toString(),
+        );
+        expect(lookedUp.sort()).toEqual([OFF_A, OFF_C].sort());
+
+        expect(result.courseCutoffs).toEqual([
+          { offeringId: OFF_A, cutoffMarks: 2 },
+          { offeringId: OFF_C, cutoffMarks: 1.1 },
+        ]);
+        expect(result.title).toBe('Full');
+      });
+
+      it('can clear a cut-off without checking the (maybe deactivated) course', async () => {
+        mockTestModel.findOne.mockReturnValue(chainable(existingTest()));
+        mockTestModel.findOneAndUpdate = jest
+          .fn()
+          .mockReturnValue(chainable(updatedDoc([[OFF_B, 1.2]])));
+
+        await service.updateCourseCutoffs(TEST_ID, {
+          courseCutoffs: [{ offeringId: OFF_A, cutoffMarks: null }],
+        });
+
+        expect(offeringModel.find).not.toHaveBeenCalled();
+        const [, update] = mockTestModel.findOneAndUpdate.mock.calls[0];
+        expect(update.$set.courseCutoffs).toEqual([
+          { offering: new Types.ObjectId(OFF_B), cutoffMarks: 1.2 },
+        ]);
+        expect(update.$set).not.toHaveProperty('updatedBy'); // no actor given
+      });
+
+      it('keeps stored cut-offs when the edit list is empty', async () => {
+        mockTestModel.findOne.mockReturnValue(chainable(existingTest()));
+        mockTestModel.findOneAndUpdate = jest.fn().mockReturnValue(
+          chainable(
+            updatedDoc([
+              [OFF_A, 1],
+              [OFF_B, 1.2],
+            ]),
+          ),
+        );
+        await service.updateCourseCutoffs(
+          TEST_ID,
+          { courseCutoffs: [] },
+          USER_ID,
+        );
+        const [, update] = mockTestModel.findOneAndUpdate.mock.calls[0];
+        expect(update.$set.courseCutoffs).toHaveLength(2);
+      });
+
+      it('sets cut-offs on a paper that had none', async () => {
+        mockTestModel.findOne.mockReturnValue(
+          chainable(existingTest({ courseCutoffs: undefined })),
+        );
+        offeringModel.find.mockReturnValue(chainable([offering(OFF_A)]));
+        mockTestModel.findOneAndUpdate = jest
+          .fn()
+          .mockReturnValue(chainable(updatedDoc([[OFF_A, 1.5]])));
+        await service.updateCourseCutoffs(
+          TEST_ID,
+          { courseCutoffs: [{ offeringId: OFF_A, cutoffMarks: 1.5 }] },
+          USER_ID,
+        );
+        const [, update] = mockTestModel.findOneAndUpdate.mock.calls[0];
+        expect(update.$set.courseCutoffs).toEqual([
+          { offering: new Types.ObjectId(OFF_A), cutoffMarks: 1.5 },
+        ]);
+      });
+
+      it('derives the maximum from subjectConfig when totalMarks is missing', async () => {
+        mockTestModel.findOne.mockReturnValue(
+          chainable(
+            existingTest({
+              totalMarks: undefined,
+              subjectConfig: [{ numberOfQuestions: 10, marksPerQuestion: 4 }],
+            }),
+          ),
+        );
+        offeringModel.find.mockReturnValue(chainable([offering(OFF_A)]));
+        mockTestModel.findOneAndUpdate = jest
+          .fn()
+          .mockReturnValue(chainable(updatedDoc([[OFF_A, 40]])));
+        await service.updateCourseCutoffs(TEST_ID, {
+          courseCutoffs: [{ offeringId: OFF_A, cutoffMarks: 40 }],
+        });
+        expect(mockTestModel.findOneAndUpdate).toHaveBeenCalled();
+
+        mockTestModel.findOneAndUpdate.mockClear();
+        await expectCode(
+          service.updateCourseCutoffs(TEST_ID, {
+            courseCutoffs: [{ offeringId: OFF_A, cutoffMarks: 41 }],
+          }),
+          'CUTOFF_OUT_OF_RANGE',
+        );
+        expect(mockTestModel.findOneAndUpdate).not.toHaveBeenCalled();
+      });
+
+      it('applies the same validation as publish and never writes on failure', async () => {
+        mockTestModel.findOne.mockReturnValue(chainable(existingTest()));
+        mockTestModel.findOneAndUpdate = jest.fn();
+
+        offeringModel.find.mockReturnValue(
+          chainable([
+            offering(OFF_A, { exam: new Types.ObjectId(OTHER_EXAM_ID) }),
+          ]),
+        );
+        await expectCode(
+          service.updateCourseCutoffs(TEST_ID, {
+            courseCutoffs: [{ offeringId: OFF_A, cutoffMarks: 1 }],
+          }),
+          'COURSE_NOT_ELIGIBLE',
+        );
+
+        await expectCode(
+          service.updateCourseCutoffs(TEST_ID, {
+            courseCutoffs: [
+              { offeringId: OFF_A, cutoffMarks: 1 },
+              { offeringId: OFF_A, cutoffMarks: null },
+            ],
+          }),
+          'DUPLICATE_COURSE_CUTOFF',
+        );
+
+        offeringModel.find.mockReturnValue(chainable([]));
+        await expectCode(
+          service.updateCourseCutoffs(TEST_ID, {
+            courseCutoffs: [{ offeringId: OFF_C, cutoffMarks: 1 }],
+          }),
+          'COURSE_NOT_FOUND',
+        );
+
+        expect(mockTestModel.findOneAndUpdate).not.toHaveBeenCalled();
+      });
+
+      it('404s when the paper disappears between read and write', async () => {
+        mockTestModel.findOne.mockReturnValue(chainable(existingTest()));
+        mockTestModel.findOneAndUpdate = jest
+          .fn()
+          .mockReturnValue(chainable(null));
+        await expect(
+          service.updateCourseCutoffs(TEST_ID, {
+            courseCutoffs: [{ offeringId: OFF_A, cutoffMarks: null }],
+          }),
+        ).rejects.toThrow(NotFoundException);
+      });
+    });
+
+    describe('visibility', () => {
+      const doc = () => ({
+        ...updatedDocForVisibility(),
+      });
+      function updatedDocForVisibility() {
+        return {
+          id: TEST_ID,
+          _id: { toString: () => TEST_ID },
+          title: 'Full',
+          totalQuestions: 1,
+          durationInMinutes: 60,
+          totalMarks: 2,
+          isSessionWise: false,
+          exam: {
+            _id: { toString: () => EXAM_ID },
+            name: 'CGL',
+            toString: () => EXAM_ID,
+          },
+          questionIds: [{ toString: () => Q1 }],
+          subjectConfig: [
+            {
+              subject: { toString: () => SUB_ID },
+              name: 'GS',
+              numberOfQuestions: 1,
+              marksPerQuestion: 2,
+              hasNegativeMarking: false,
+              negativeMarksPerQuestion: 0,
+              questionStartIndex: 0,
+              questionEndIndex: 0,
+              questionIds: [{ toString: () => Q1 }],
+            },
+          ],
+          marksPerQuestion: 2,
+          negativeMarking: 0,
+          allowRetake: true,
+          shuffleOptions: false,
+          showResultsImmediately: true,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          courseCutoffs: [
+            { offering: { toString: () => OFF_A }, cutoffMarks: 1.5 },
+          ],
+        };
+      }
+
+      it('list: students never receive cut-offs, admins do', async () => {
+        mockTestModel.find.mockReturnValue(chainable([doc()]));
+        mockTestsService.getUserAttemptActions.mockResolvedValue(new Map());
+
+        const student = await service.listPublished(
+          EXAM_ID,
+          1,
+          10,
+          USER_ID,
+          false,
+        );
+        expect(student.data[0]).not.toHaveProperty('courseCutoffs');
+
+        mockTestModel.find.mockReturnValue(chainable([doc()]));
+        const admin = await service.listPublished(
+          EXAM_ID,
+          1,
+          10,
+          USER_ID,
+          true,
+        );
+        expect(admin.data[0].courseCutoffs).toEqual([
+          { offeringId: OFF_A, cutoffMarks: 1.5 },
+        ]);
+      });
+
+      it('detail: only the admin view (with questions) includes cut-offs', async () => {
+        mockTestModel.findOne.mockReturnValue(chainable(doc()));
+        mockTestsService.getUserAttemptActions.mockResolvedValue(new Map());
+        questionModel.find.mockReturnValue(chainable([questionLean(Q1)]));
+
+        const student = await service.findOnePublished(TEST_ID, USER_ID, false);
+        expect(student).not.toHaveProperty('courseCutoffs');
+
+        const admin = await service.findOnePublished(TEST_ID, USER_ID, true);
+        expect(admin.courseCutoffs).toEqual([
+          { offeringId: OFF_A, cutoffMarks: 1.5 },
+        ]);
+      });
+
+      it('papers without cut-offs return an empty list for admins', async () => {
+        const noCutoffs = { ...doc(), courseCutoffs: undefined };
+        mockTestModel.find.mockReturnValue(chainable([noCutoffs]));
+        const admin = await service.listPublished(
+          EXAM_ID,
+          1,
+          10,
+          undefined,
+          true,
+        );
+        expect(admin.data[0].courseCutoffs).toEqual([]);
+      });
     });
   });
 });

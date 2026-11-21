@@ -88,6 +88,8 @@ export class AnalysisFullMocksSectionDto {
   recent: AnalysisFullMockAttemptDto[];
 }
 
+export type AnalysisPathwayStatus = 'NO_ATTEMPTS' | 'NO_CUTOFF' | 'EVALUATED';
+
 export class AnalysisPathwayDto {
   @ApiProperty()
   id: string;
@@ -98,22 +100,86 @@ export class AnalysisPathwayDto {
   @ApiPropertyOptional()
   subtitle?: string;
 
-  @ApiProperty()
+  @ApiProperty({
+    enum: ['NO_ATTEMPTS', 'NO_CUTOFF', 'EVALUATED'],
+    description:
+      'NO_ATTEMPTS: no completed full mock yet. NO_CUTOFF: attempts exist but none of the recent mocks has a cut-off for this course. EVALUATED: band/bar are meaningful.',
+  })
+  status: AnalysisPathwayStatus;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Recency-weighted marks over the last <=10 full mocks. When EVALUATED it only counts mocks that have a cut-off for this course; when NO_CUTOFF it covers every mock in the window. Null when NO_ATTEMPTS.',
+  })
+  yourMarks: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Same-weighted average of the cut-off marks set on those mocks. Null unless EVALUATED.',
+  })
+  cutoffMarks: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'cutoffMarks plus the 5% comfort margin. Null unless EVALUATED.',
+  })
+  comfortMarks: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'yourMarks - cutoffMarks (negative = short of the cut-off). Null unless EVALUATED.',
+  })
+  gapMarks: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Scale for the bar: max score of the latest full mock, else the exam total marks.',
+  })
+  maxMarks: number | null;
+
+  @ApiProperty({
+    description: 'How many mocks are behind yourMarks / cutoffMarks',
+  })
+  attemptsConsidered: number;
+
+  @ApiProperty({
+    description: 'How many of the latest full mocks were looked at (<= 10)',
+  })
+  attemptsInWindow: number;
+
+  @ApiProperty({
+    deprecated: true,
+    description:
+      'DEPRECATED, derived: cutoffMarks / maxMarks * 100 (legacy minPercent when not EVALUATED).',
+  })
   minPercent: number;
 
-  @ApiProperty()
+  @ApiProperty({
+    deprecated: true,
+    description: 'DEPRECATED, derived: comfortMarks / maxMarks * 100.',
+  })
   comfortPercent: number;
 
   @ApiPropertyOptional({
     nullable: true,
-    description: 'User average of last N full mocks; null when none',
+    deprecated: true,
+    description: 'DEPRECATED, derived: yourMarks / maxMarks * 100.',
   })
   userPercent: number | null;
 
-  @ApiProperty({ description: '0–1 progress toward min threshold' })
+  @ApiProperty({ description: '0–1: yourMarks / cutoffMarks, capped at 1' })
   progress01: number;
 
-  @ApiProperty({ enum: ['below', 'borderline', 'comfortable'] })
+  @ApiProperty({
+    enum: ['below', 'borderline', 'comfortable'],
+    description:
+      'Only meaningful when status is EVALUATED (otherwise "below").',
+  })
   band: 'below' | 'borderline' | 'comfortable';
 
   @ApiProperty()

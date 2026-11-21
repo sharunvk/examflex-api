@@ -1,5 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types, Query } from 'mongoose';
+import {
+  ImageMetadata,
+  ImageMetadataSchema,
+} from '../../mock-test-attempts/schemas/question.schema';
 
 export type EquationDocument = Equation & Document;
 
@@ -26,6 +30,13 @@ export class Equation {
 
   @Prop({ type: [String], default: [] })
   bulletPoints: string[];
+
+  /**
+   * Optional picture shown with the equation (diagram, derivation...). Stored
+   * like question images: S3 key + bucket, signed on read. Absent / null = none.
+   */
+  @Prop({ type: ImageMetadataSchema })
+  image?: ImageMetadata | null;
 
   @Prop({
     type: Types.ObjectId,

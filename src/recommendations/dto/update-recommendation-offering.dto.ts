@@ -69,7 +69,12 @@ export class UpdateRecommendationOfferingDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   description?: string;
 
-  @ApiPropertyOptional({ minimum: 0, maximum: 100 })
+  @ApiPropertyOptional({
+    deprecated: true,
+    description: 'DEPRECATED: ignored by pathway calculations.',
+    minimum: 0,
+    maximum: 100,
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)

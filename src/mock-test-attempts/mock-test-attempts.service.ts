@@ -92,6 +92,18 @@ export class MockTestAttemptsService {
     }
   }
 
+  /** `mockTest` is populated (with paperType) on detail loads; an id otherwise. */
+  private mockTestIdOf(
+    mockTest: MockTestAttemptDocument['mockTest'] | null | undefined,
+  ): string | undefined {
+    if (!mockTest) return undefined;
+    const ref = mockTest as unknown as {
+      _id?: { toString(): string };
+      toString(): string;
+    };
+    return (ref._id ?? ref).toString();
+  }
+
   private getCurrentSession(
     attempt: MockTestAttemptDocument,
   ): AttemptSession | null {
@@ -857,6 +869,7 @@ export class MockTestAttemptsService {
       attemptId: attempt.id,
       status: attempt.status,
       test: {
+        mockTestId: this.mockTestIdOf(attempt.mockTest),
         title: attempt.testTitle,
         durationInMinutes: attempt.durationInMinutes,
         totalQuestions: attempt.totalQuestions,

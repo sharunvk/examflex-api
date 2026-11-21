@@ -6,6 +6,10 @@ import {
   MockTestAttempt,
   MockTestAttemptSchema,
 } from '../mock-test-attempts/schemas/mock-test-attempt.schema';
+import {
+  MockTest,
+  MockTestSchema,
+} from '../mock-tests/schemas/mock-test.schema';
 import { RecommendationsModule } from '../recommendations/recommendations.module';
 import { AnalysisController } from './analysis.controller';
 import { AnalysisService } from './analysis.service';
@@ -16,6 +20,7 @@ import { AnalysisService } from './analysis.service';
     MongooseModule.forFeature([
       { name: MockTestAttempt.name, schema: MockTestAttemptSchema },
       { name: Exam.name, schema: ExamSchema },
+      { name: MockTest.name, schema: MockTestSchema },
     ]),
     RecommendationsModule,
   ],

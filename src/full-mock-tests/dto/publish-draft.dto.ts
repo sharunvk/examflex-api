@@ -1,5 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsEnum,
   IsNumber,
@@ -7,9 +9,11 @@ import {
   IsString,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { AccessMode } from '../../common/enums/access-mode.enum';
+import { CourseCutoffEntryDto, MAX_COURSE_CUTOFFS } from './course-cutoff.dto';
 
 export class PublishDraftDto {
   @ApiPropertyOptional({
@@ -92,4 +96,16 @@ export class PublishDraftDto {
   @IsNumber()
   @Min(0)
   passingScore?: number;
+
+  @ApiPropertyOptional({
+    description:
+      "Optional per-course cut-off marks for this paper, in absolute marks on the paper's scale. Only courses the admin fills in need to be sent.",
+    type: [CourseCutoffEntryDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_COURSE_CUTOFFS)
+  @ValidateNested({ each: true })
+  @Type(() => CourseCutoffEntryDto)
+  courseCutoffs?: CourseCutoffEntryDto[];
 }

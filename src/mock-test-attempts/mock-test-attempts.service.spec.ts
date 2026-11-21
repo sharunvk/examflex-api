@@ -850,6 +850,28 @@ describe('MockTestAttemptsService', () => {
       expect(result.isPassed).toBe(true);
     });
 
+    it('returns the subject id and, when populated, its name', async () => {
+      attemptModel.findOne.mockReturnValue(chainable(makeAttempt()));
+      questionModel.find.mockReturnValue(
+        chainable([
+          {
+            ...questionDoc(Q1),
+            subject: { _id: { toString: () => SUB_ID }, name: 'Physics' },
+          },
+          questionDoc(Q2),
+        ]),
+      );
+
+      const result = await service.findOne(ATTEMPT_ID, USER_ID);
+      const [first, second] = result.questions as unknown as Array<{
+        subject: string;
+        subjectName?: string;
+      }>;
+      expect(first).toMatchObject({ subject: SUB_ID, subjectName: 'Physics' });
+      expect(second.subject).toBe(SUB_ID);
+      expect(second.subjectName).toBeUndefined();
+    });
+
     it('omits topic and uses paused elapsed time', async () => {
       const attempt = makeAttempt({
         status: 'PAUSED',

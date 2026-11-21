@@ -1731,8 +1731,10 @@ export class MockTestAttemptsService {
   ): Promise<Array<{ aq: AttemptQuestion; question: any }>> {
     const ids = attemptQuestions.map(q => q.question);
     // Include soft-deleted rows: the attempt already locked these IDs into the paper.
+    // Populate the subject so responses can carry its name next to the id.
     let query = this.questionModel
       .find({ _id: { $in: ids } })
+      .populate('subject', 'name')
       .setOptions({ includeDeleted: true });
     if (hideAnswers) {
       query = query.select('-correctAnswer -explanation');
@@ -1764,7 +1766,9 @@ export class MockTestAttemptsService {
         ml?: string | null;
         image?: ImageLike;
       }>;
-      subject?: { toString(): string };
+      subject?:
+        | { toString(): string }
+        | { _id: { toString(): string }; name?: string };
       topic?: { toString(): string };
       difficultyLevel?: string;
     }>,
@@ -1794,6 +1798,29 @@ export class MockTestAttemptsService {
     ];
   }
 
+  /**
+   * `subject` is the id; `subjectName` is only present when the subject was
+   * populated and has a name. Accepts a bare ObjectId too (e.g. in tests).
+   */
+  private subjectFields(subject: unknown): {
+    subject: string | undefined;
+    subjectName?: string;
+  } {
+    if (subject && typeof subject === 'object' && '_id' in subject) {
+      const populated = subject as {
+        _id: { toString(): string };
+        name?: string;
+      };
+      return {
+        subject: populated._id.toString(),
+        ...(populated.name ? { subjectName: populated.name } : {}),
+      };
+    }
+    return {
+      subject: (subject as { toString(): string } | undefined)?.toString(),
+    };
+  }
+
   private async mapAttemptQuestions(
     questions: Array<{
       _id: { toString(): string };
@@ -1809,7 +1836,9 @@ export class MockTestAttemptsService {
         ml?: string | null;
         image?: ImageLike;
       }>;
-      subject?: { toString(): string };
+      subject?:
+        | { toString(): string }
+        | { _id: { toString(): string }; name?: string };
       topic?: { toString(): string };
       difficultyLevel?: string;
     }>,
@@ -1844,7 +1873,7 @@ export class MockTestAttemptsService {
         },
         optionType: question.optionType,
         options,
-        subject: question.subject?.toString(),
+        ...this.subjectFields(question.subject),
         topic: question.topic?.toString(),
         difficultyLevel: question.difficultyLevel,
       };

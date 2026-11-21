@@ -66,6 +66,13 @@ class AttemptQuestionDto {
   subject: string;
 
   @ApiPropertyOptional({
+    description:
+      'Display name of the question subject. Present when the subject could be resolved.',
+    example: 'Physics',
+  })
+  subjectName?: string;
+
+  @ApiPropertyOptional({
     description: 'Question difficulty',
     enum: ['easy', 'medium', 'hard'],
   })

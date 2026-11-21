@@ -5,6 +5,7 @@ import { AccessResponseDto } from '../../access/dto/access-response.dto';
 import { AttemptSummaryDto } from '../../mock-tests/dto/attempt-summary.dto';
 import { ExamSummaryDto } from '../../mock-tests/dto/mock-test-list-item.dto';
 import { DraftSubjectBlockDto } from './draft-response.dto';
+import { CourseCutoffResponseDto } from './course-cutoff.dto';
 
 export class FullMockSubjectConfigDto {
   @ApiProperty({
@@ -182,4 +183,11 @@ export class FullMockTestListItemDto {
     type: [DraftSubjectBlockDto],
   })
   subjects?: DraftSubjectBlockDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Admin-only: stored course cut-off marks for this paper. Never sent to students.',
+    type: [CourseCutoffResponseDto],
+  })
+  courseCutoffs?: CourseCutoffResponseDto[];
 }

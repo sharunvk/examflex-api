@@ -15,17 +15,27 @@ import {
   MockTestAttemptDocument,
 } from '../mock-test-attempts/schemas/mock-test-attempt.schema';
 import {
+  MockTest,
+  MockTestDocument,
+} from '../mock-tests/schemas/mock-test.schema';
+import {
+  PATHWAY_ATTEMPT_WINDOW,
   attemptScorePercent,
   averagePercent,
-  evaluatePathwayBand,
-  resolveComfortPercent,
+  clampPercent,
+  evaluateCutoffBand,
+  recencyWeights,
+  round2,
+  weightedAverage,
 } from '../recommendations/pathway-bands';
+import { attemptMaxScore } from './attempt-score';
 import { RecommendationsService } from '../recommendations/recommendations.service';
 import {
   AnalysisFullMockAttemptDto,
   AnalysisLatestFullMockDto,
   AnalysisOverviewResponseDto,
   AnalysisPathwayDto,
+  AnalysisPathwayStatus,
   AnalysisSubjectInsightDto,
   AnalysisTopicInsightDto,
 } from './dto/analysis-overview-response.dto';
@@ -36,6 +46,7 @@ const ANALYSIS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 type LeanAttempt = {
   _id: Types.ObjectId;
+  mockTest?: Types.ObjectId;
   testTitle?: string;
   score: number;
   totalQuestions: number;
@@ -46,8 +57,26 @@ type LeanAttempt = {
   questions?: Array<{
     isCorrect?: boolean | null;
     selectedOption?: string | null;
+    marksPerQuestion?: number | null;
   }>;
 };
+
+/** One completed full-mock attempt inside the pathway window. */
+type WindowAttempt = {
+  attemptId: string;
+  mockTestId: string | null;
+  title: string;
+  score: number;
+  maxScore: number;
+  percent: number;
+  submittedAt: string;
+};
+
+/** offeringId -> cut-off marks, per mock test id. */
+type CutoffsByMock = Map<string, Map<string, number>>;
+
+const cacheKeyFor = (userId: string, examId: string) =>
+  `analysis:overview:v2:${userId}:${examId}`;
 
 type NamedRef = { _id: Types.ObjectId; name?: string };
 
@@ -58,6 +87,8 @@ export class AnalysisService {
     private readonly attemptModel: Model<MockTestAttemptDocument>,
     @InjectModel(Exam.name)
     private readonly examModel: Model<ExamDocument>,
+    @InjectModel(MockTest.name)
+    private readonly mockTestModel: Model<MockTestDocument>,
     private readonly recommendationsService: RecommendationsService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
@@ -73,7 +104,7 @@ export class AnalysisService {
       throw new BadRequestException('Invalid user');
     }
 
-    const cacheKey = `analysis:overview:${userId}:${examId}`;
+    const cacheKey = cacheKeyFor(userId, examId);
     const cached =
       await this.cacheManager.get<AnalysisOverviewResponseDto>(cacheKey);
     if (cached) {
@@ -107,29 +138,31 @@ export class AnalysisService {
         this.loadChapterWiseInsights(userObjectId, examObjectId),
         this.recommendationsService.listActiveCoursesForExam(examId),
       ]);
-    const { items: fullMocks, latestRow } = fullMockBundle;
+    const { window, latestRow } = fullMockBundle;
 
-    const percents = fullMocks.map(item => item.percent);
-    const avg = averagePercent(percents);
+    // Newest-first, capped at the chart size so History/Today are unchanged.
+    const fullMocks: AnalysisFullMockAttemptDto[] = window
+      .slice(0, FULL_MOCK_TARGET)
+      .map((item, index, shown) => ({
+        attemptId: item.attemptId,
+        label: `Mock ${shown.length - index}`,
+        title: item.title,
+        score: Math.round(item.score),
+        maxScore: item.maxScore,
+        percent: item.percent,
+        submittedAt: item.submittedAt,
+      }));
 
-    const pathways: AnalysisPathwayDto[] = offerings.map(offering => {
-      const comfort = resolveComfortPercent(
-        offering.minPercent,
-        offering.comfortPercent,
-      );
-      const band = evaluatePathwayBand(avg, offering.minPercent, comfort);
-      return {
-        id: offering.id,
-        title: offering.title,
-        ...(offering.subtitle ? { subtitle: offering.subtitle } : {}),
-        minPercent: offering.minPercent,
-        comfortPercent: comfort,
-        userPercent: avg,
-        progress01: band.progress01,
-        band: band.band,
-        message: band.message,
-      };
-    });
+    const cutoffsByMock = await this.loadCutoffsByMock(window);
+    const examTotalMarks =
+      typeof exam.totalMarks === 'number' ? exam.totalMarks : null;
+    const pathways = this.buildPathways(
+      offerings,
+      window,
+      cutoffsByMock,
+      examTotalMarks,
+    );
+    const avg = this.weightedPercent(window);
 
     const latest = this.buildLatest(fullMocks, latestRow);
     const overview: AnalysisOverviewResponseDto = {
@@ -150,7 +183,7 @@ export class AnalysisService {
       },
       pathways: {
         averagePercent: avg,
-        attemptCountUsed: fullMocks.length,
+        attemptCountUsed: window.length,
         offerings: pathways,
       },
       subjects: {
@@ -179,7 +212,7 @@ export class AnalysisService {
     const examIds = (await this.cacheManager.get<string[]>(indexKey)) ?? [];
     await Promise.all([
       ...examIds.map(examId =>
-        this.cacheManager.del(`analysis:overview:${userId}:${examId}`),
+        this.cacheManager.del(cacheKeyFor(userId, examId)),
       ),
       this.cacheManager.del(indexKey),
     ]);
@@ -198,10 +231,14 @@ export class AnalysisService {
     }
   }
 
+  /**
+   * Latest completed full mocks (newest first), up to the pathway window.
+   * `window[0]` is the newest attempt.
+   */
   private async loadRecentFullMocks(
     userId: Types.ObjectId,
     examId: Types.ObjectId,
-  ): Promise<{ items: AnalysisFullMockAttemptDto[]; latestRow?: LeanAttempt }> {
+  ): Promise<{ window: WindowAttempt[]; latestRow?: LeanAttempt }> {
     const rows = await this.attemptModel
       .find({
         user: userId,
@@ -211,36 +248,191 @@ export class AnalysisService {
         submittedAt: { $exists: true },
       })
       .sort({ submittedAt: -1 })
-      .limit(FULL_MOCK_TARGET)
+      .limit(PATHWAY_ATTEMPT_WINDOW)
       .select(
-        'testTitle score totalQuestions marksPerQuestion submittedAt questions',
+        'mockTest testTitle score totalQuestions marksPerQuestion submittedAt questions',
       )
       .lean<LeanAttempt[]>()
       .exec();
 
-    const items = rows.map((row, index) => {
-      const maxScore = Math.max(
-        1,
-        (row.totalQuestions ?? 0) * (row.marksPerQuestion ?? 0),
-      );
-      const percent = attemptScorePercent(
-        row.score ?? 0,
-        row.totalQuestions ?? 0,
-        row.marksPerQuestion ?? 0,
-      );
-      const label = `Mock ${rows.length - index}`;
+    const window: WindowAttempt[] = rows.map((row, index) => {
+      const maxScore = Math.max(1, attemptMaxScore(row));
       return {
         attemptId: row._id.toHexString(),
-        label,
-        title: row.testTitle?.trim() || label,
-        score: Math.round(row.score ?? 0),
+        mockTestId: row.mockTest ? row.mockTest.toString() : null,
+        title: row.testTitle?.trim() || `Mock ${rows.length - index}`,
+        score: row.score ?? 0,
         maxScore,
-        percent,
+        percent: attemptScorePercent(row.score ?? 0, 0, 0, maxScore),
         submittedAt: (row.submittedAt ?? new Date()).toISOString(),
       };
     });
 
-    return { items, latestRow: rows[0] };
+    return { window, latestRow: rows[0] };
+  }
+
+  /** One query: cut-offs set on the mocks behind the window's attempts. */
+  private async loadCutoffsByMock(
+    window: WindowAttempt[],
+  ): Promise<CutoffsByMock> {
+    const ids = [
+      ...new Set(
+        window
+          .map(item => item.mockTestId)
+          .filter((id): id is string => id !== null),
+      ),
+    ];
+    const map: CutoffsByMock = new Map();
+    if (ids.length === 0) return map;
+
+    const tests = await this.mockTestModel
+      .find({ _id: { $in: ids.map(id => new Types.ObjectId(id)) } })
+      .select('courseCutoffs')
+      .lean<
+        Array<{
+          _id: Types.ObjectId;
+          courseCutoffs?: Array<{
+            offering: Types.ObjectId;
+            cutoffMarks: number;
+          }>;
+        }>
+      >()
+      .exec();
+
+    for (const test of tests) {
+      const perCourse = new Map<string, number>();
+      for (const entry of test.courseCutoffs ?? []) {
+        if (
+          Number.isFinite(entry.cutoffMarks) &&
+          entry.cutoffMarks > 0 &&
+          entry.offering
+        ) {
+          perCourse.set(entry.offering.toString(), entry.cutoffMarks);
+        }
+      }
+      map.set(test._id.toString(), perCourse);
+    }
+    return map;
+  }
+
+  /** Recency-weighted average score percent over the whole window. */
+  private weightedPercent(window: WindowAttempt[]): number | null {
+    const oldestFirst = [...window].reverse();
+    const value = weightedAverage(
+      oldestFirst.map(item => item.percent),
+      recencyWeights(oldestFirst.length),
+    );
+    return value === null ? null : Math.round(value * 10) / 10;
+  }
+
+  private buildPathways(
+    offerings: Array<{
+      id: string;
+      title: string;
+      subtitle?: string;
+      minPercent?: number;
+      comfortPercent?: number;
+    }>,
+    window: WindowAttempt[],
+    cutoffsByMock: CutoffsByMock,
+    examTotalMarks: number | null,
+  ): AnalysisPathwayDto[] {
+    // Recency weights are positional across the whole window, so "latest
+    // matters most" holds even when the newest mock has no cut-off for a course.
+    const oldestFirst = [...window].reverse();
+    const weights = recencyWeights(oldestFirst.length);
+    const maxMarks = window[0]?.maxScore ?? examTotalMarks;
+    const overallMarks = weightedAverage(
+      oldestFirst.map(item => item.score),
+      weights,
+    );
+
+    return offerings.map(offering => {
+      const paired = oldestFirst
+        .map((item, index) => ({
+          item,
+          weight: weights[index],
+          cutoff: item.mockTestId
+            ? cutoffsByMock.get(item.mockTestId)?.get(offering.id)
+            : undefined,
+        }))
+        .filter(
+          (entry): entry is typeof entry & { cutoff: number } =>
+            typeof entry.cutoff === 'number',
+        );
+
+      let status: AnalysisPathwayStatus;
+      let yourMarks: number | null = null;
+      let cutoffMarks: number | null = null;
+
+      if (window.length === 0) {
+        status = 'NO_ATTEMPTS';
+      } else if (paired.length === 0) {
+        status = 'NO_CUTOFF';
+        yourMarks = overallMarks === null ? null : round2(overallMarks);
+      } else {
+        status = 'EVALUATED';
+        const weightedScore = weightedAverage(
+          paired.map(entry => entry.item.score),
+          paired.map(entry => entry.weight),
+        );
+        const weightedCutoff = weightedAverage(
+          paired.map(entry => entry.cutoff),
+          paired.map(entry => entry.weight),
+        );
+        yourMarks = weightedScore === null ? null : round2(weightedScore);
+        cutoffMarks = weightedCutoff === null ? null : round2(weightedCutoff);
+      }
+
+      const evaluation =
+        status === 'EVALUATED'
+          ? evaluateCutoffBand(yourMarks, cutoffMarks)
+          : null;
+
+      const finalStatus: AnalysisPathwayStatus =
+        status === 'EVALUATED' && !evaluation ? 'NO_CUTOFF' : status;
+
+      const message =
+        evaluation?.message ??
+        (status === 'NO_ATTEMPTS'
+          ? 'Attempt a full mock to see how this path looks for you.'
+          : 'Cut-off not announced yet for your recent mocks.');
+
+      const percentOf = (marks: number | null): number | null =>
+        marks !== null && maxMarks !== null && maxMarks > 0
+          ? Math.round(clampPercent((marks / maxMarks) * 100) * 10) / 10
+          : null;
+
+      return {
+        id: offering.id,
+        title: offering.title,
+        ...(offering.subtitle ? { subtitle: offering.subtitle } : {}),
+        status: finalStatus,
+        yourMarks,
+        cutoffMarks: evaluation ? cutoffMarks : null,
+        comfortMarks: evaluation ? evaluation.comfortMarks : null,
+        gapMarks: evaluation ? evaluation.gapMarks : null,
+        maxMarks,
+        attemptsConsidered:
+          status === 'EVALUATED'
+            ? paired.length
+            : status === 'NO_CUTOFF'
+              ? window.length
+              : 0,
+        attemptsInWindow: window.length,
+        // Legacy percent fields stay populated so an older app build keeps working.
+        minPercent: percentOf(cutoffMarks) ?? offering.minPercent ?? 0,
+        comfortPercent:
+          percentOf(evaluation?.comfortMarks ?? null) ??
+          offering.comfortPercent ??
+          offering.minPercent ??
+          0,
+        userPercent: percentOf(yourMarks),
+        progress01: evaluation?.progress01 ?? 0,
+        band: evaluation?.band ?? 'below',
+        message,
+      };
+    });
   }
 
   private buildLatest(

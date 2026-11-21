@@ -53,7 +53,7 @@ export class RecommendationsService {
       title: dto.title,
       subtitle: dto.subtitle,
       description: dto.description,
-      minPercent: dto.minPercent,
+      ...(dto.minPercent !== undefined ? { minPercent: dto.minPercent } : {}),
       ...(dto.comfortPercent !== undefined
         ? { comfortPercent: dto.comfortPercent }
         : {}),
@@ -282,10 +282,12 @@ export class RecommendationsService {
   }
 
   private assertThresholds(
-    minPercent: number,
+    minPercent?: number | null,
     comfortPercent?: number | null,
   ): void {
     if (
+      minPercent !== undefined &&
+      minPercent !== null &&
       comfortPercent !== undefined &&
       comfortPercent !== null &&
       comfortPercent < minPercent
@@ -380,7 +382,7 @@ export class RecommendationsService {
       title: doc.title,
       ...(doc.subtitle ? { subtitle: doc.subtitle } : {}),
       ...(doc.description ? { description: doc.description } : {}),
-      minPercent: doc.minPercent,
+      ...(doc.minPercent !== undefined ? { minPercent: doc.minPercent } : {}),
       ...(doc.comfortPercent !== undefined
         ? { comfortPercent: doc.comfortPercent }
         : {}),

@@ -45,6 +45,26 @@ export const MockTestSubjectConfigSchema = SchemaFactory.createForClass(
   MockTestSubjectConfig,
 );
 
+/**
+ * Cut-off marks an admin expects for one recommendation course on a
+ * FULL_EXAM paper. Absolute marks on the paper's own scale (e.g. 620 of 720).
+ */
+@Schema({ _id: false })
+export class MockTestCourseCutoff {
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'RecommendationOffering',
+    required: true,
+  })
+  offering: Types.ObjectId;
+
+  @Prop({ type: Number, required: true, min: 0 })
+  cutoffMarks: number;
+}
+
+export const MockTestCourseCutoffSchema =
+  SchemaFactory.createForClass(MockTestCourseCutoff);
+
 @Schema({ _id: false })
 export class DifficultyDistribution {
   @Prop({ type: Number, default: 0 })
@@ -144,6 +164,14 @@ export class MockTest {
 
   @Prop({ type: [MockTestSubjectConfigSchema], default: undefined })
   subjectConfig?: MockTestSubjectConfig[];
+
+  /**
+   * FULL_EXAM only. Optional per-course cut-off marks used by the student
+   * Analysis pathways. `default: undefined` keeps every other document
+   * untouched.
+   */
+  @Prop({ type: [MockTestCourseCutoffSchema], default: undefined })
+  courseCutoffs?: MockTestCourseCutoff[];
 
   @Prop()
   passingScore?: number;

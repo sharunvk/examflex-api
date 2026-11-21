@@ -166,6 +166,18 @@ export class FullMockTestsService {
               return id ? subjectNameById.get(id) || id : undefined;
             })
             .filter((name): name is string => Boolean(name)),
+          subjectDetails: Array.from(exam.subjects || [])
+            .map(row => {
+              const id = this.subjectIdFromRow(row);
+              return id
+                ? {
+                    subjectId: id,
+                    name: subjectNameById.get(id) || id,
+                    numberOfQuestions: row.numberOfQuestions || 0,
+                  }
+                : undefined;
+            })
+            .filter((detail): detail is NonNullable<typeof detail> => !!detail),
           mode: exam.isSessionWise ? 'Session-wise' : 'Mixed',
         };
       }),
@@ -200,7 +212,10 @@ export class FullMockTestsService {
     }
 
     const { questions, subjectNames } =
-      await this.selectionService.generatePaper(exam);
+      await this.selectionService.generatePaper(
+        exam,
+        dto.difficultyDistribution,
+      );
     const arranged = this.selectionService.arrangePaperQuestions(
       questions,
       exam.subjects,

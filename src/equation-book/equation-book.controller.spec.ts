@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EquationBookController } from './equation-book.controller';
 import { EquationBookService } from './equation-book.service';
+import { UserRole } from '../common/enums/user-role.enum';
 
 const OID = '507f1f77bcf86cd799439011';
 
@@ -54,18 +55,57 @@ describe('EquationBookController', () => {
     });
     const result = await controller.findAll(1, 10, OID, OID, OID, 'force');
     expect(result.data).toHaveLength(1);
-    expect(service.findAll).toHaveBeenCalledWith(1, 10, {
-      examId: OID,
-      subjectId: OID,
-      topicId: OID,
-      search: 'force',
-    });
+    expect(service.findAll).toHaveBeenCalledWith(
+      1,
+      10,
+      {
+        examId: OID,
+        subjectId: OID,
+        topicId: OID,
+        search: 'force',
+      },
+      false,
+    );
+  });
+
+  it('only exposes stored image metadata to admins when listing', async () => {
+    service.findAll.mockResolvedValue({ data: [], pagination: {} });
+    await controller.findAll(
+      1,
+      10,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { id: OID, role: UserRole.ADMIN } as any,
+    );
+    expect(service.findAll.mock.calls[0][3]).toBe(true);
+
+    await controller.findAll(
+      1,
+      10,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { id: OID, role: UserRole.USER } as any,
+    );
+    expect(service.findAll.mock.calls[1][3]).toBe(false);
   });
 
   it('gets one equation', async () => {
     service.findOne.mockResolvedValue({ id: OID });
     const result = await controller.findOne(OID);
     expect(result.data.id).toBe(OID);
+    expect(service.findOne).toHaveBeenCalledWith(OID, false);
+  });
+
+  it('only exposes stored image metadata to admins when fetching one', async () => {
+    service.findOne.mockResolvedValue({ id: OID });
+    await controller.findOne(OID, { id: OID, role: UserRole.ADMIN } as any);
+    expect(service.findOne).toHaveBeenLastCalledWith(OID, true);
+    await controller.findOne(OID, { id: OID, role: UserRole.USER } as any);
+    expect(service.findOne).toHaveBeenLastCalledWith(OID, false);
   });
 
   it('updates an equation', async () => {

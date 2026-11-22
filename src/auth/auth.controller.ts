@@ -36,6 +36,7 @@ import { AdminLoginDto } from './dto/admin-login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from './guards/optional-jwt-auth.guard';
 import { GetUser } from './decorators/get-user.decorator';
+import { AllowIncompleteProfile } from './decorators/allow-incomplete-profile.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import {
   assertCookieRequestOrigin,
@@ -324,6 +325,7 @@ OTP / student accounts are unchanged. Admins sign in via \`POST /auth/admin/logi
 
   @Get('profile')
   @UseGuards(JwtAuthGuard)
+  @AllowIncompleteProfile()
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get current user profile',

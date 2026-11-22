@@ -26,6 +26,7 @@
     "smoke": "bash scripts/smoke-api.sh",
     "commerce:seed-tax-config": "ts-node -r tsconfig-paths/register scripts/commerce-seed/seed-tax-config.ts",
     "users:migrate-target-exams": "ts-node -r tsconfig-paths/register scripts/migrate-target-exams.ts",
+    "users:migrate-phone-index": "ts-node -r tsconfig-paths/register scripts/migrate-phone-unique-index.ts",
     "test:all": "npm run test:unit && npm run test:e2e",
     "test:ci": "jest --config jest.config.js --coverage --watchAll=false --ci",
     "test:coverage": "jest --config jest.config.js --coverage --coverageReporters=text-lcov",

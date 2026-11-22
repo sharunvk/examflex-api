@@ -155,6 +155,18 @@ export class User {
   })
   phoneNumber?: string;
 
+  /**
+   * When ownership of `phoneNumber` was proven with an OTP (MSG91). Set at OTP
+   * sign-in and by the verify-phone step of onboarding. A number without this
+   * stamp (for example one typed into an old profile form) is not trusted.
+   */
+  @Prop()
+  phoneVerifiedAt?: Date;
+
+  /** When the learner finished the mandatory name + mobile + target exam step. */
+  @Prop()
+  onboardingCompletedAt?: Date;
+
   @Prop({
     type: String,
     lowercase: true,
@@ -260,7 +272,17 @@ export class User {
 export const UserSchema = SchemaFactory.createForClass(User);
 
 // ─── Indexes ───────────────────────────────────────────────────────────────────
-UserSchema.index({ phoneNumber: 1 }, { sparse: true });
+// Unique across accounts. Partial so users without a number (and soft-deleted
+// users, whose number is unset) never collide. Replaces the older non-unique
+// sparse `phoneNumber_1` index: run `npm run users:migrate-phone-index` to swap it.
+UserSchema.index(
+  { phoneNumber: 1 },
+  {
+    name: 'phoneNumber_unique',
+    unique: true,
+    partialFilterExpression: { phoneNumber: { $type: 'string' } },
+  },
+);
 UserSchema.index({ username: 1 }, { unique: true, sparse: true });
 UserSchema.index({ googleSub: 1 }, { unique: true, sparse: true });
 UserSchema.index({ isActive: 1, isDeleted: 1 });

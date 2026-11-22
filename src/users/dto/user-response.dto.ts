@@ -73,6 +73,30 @@ export class UserResponseDto {
   @Expose()
   phoneNumber?: string;
 
+  @ApiProperty({
+    description:
+      'True once the mobile number has been proven with an OTP. Always false for accounts without a number.',
+    example: true,
+  })
+  @Expose()
+  phoneVerified: boolean;
+
+  @ApiProperty({
+    description:
+      'True once the learner has completed the mandatory name + mobile + target exam step.',
+    example: true,
+  })
+  @Expose()
+  onboardingCompleted: boolean;
+
+  @ApiProperty({
+    description:
+      'Verified mobile AND onboarding completed. Students without this are blocked from the app APIs (403 PROFILE_INCOMPLETE). Always true for admins.',
+    example: true,
+  })
+  @Expose()
+  profileComplete: boolean;
+
   @ApiPropertyOptional({
     description: 'Admin username (admins only)',
     example: 'sharun',

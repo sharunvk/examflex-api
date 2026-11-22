@@ -36,6 +36,7 @@ import {
 import { UserResponseDto } from './dto/user-response.dto';
 import { UserRole } from '../common/enums/user-role.enum';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AllowIncompleteProfile } from '../auth/decorators/allow-incomplete-profile.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -155,6 +156,7 @@ export class UsersController {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
+  @AllowIncompleteProfile()
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get own profile',
@@ -181,6 +183,7 @@ export class UsersController {
   @Delete('me')
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
+  @AllowIncompleteProfile()
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Soft-delete own account',
@@ -210,7 +213,7 @@ export class UsersController {
   @ApiOperation({
     summary: 'Update own profile',
     description:
-      'Single endpoint to update any combination of core identity fields (name, email, phone) ' +
+      'Single endpoint to update any combination of core identity fields (name, email) ' +
       'and extended profile fields (bio, avatar, date of birth, gender, location, target exam). ' +
       'Only the fields provided in the request body are updated.',
   })
@@ -221,7 +224,7 @@ export class UsersController {
   })
   @ApiBadRequestResponse({ description: 'Validation failed' })
   @ApiConflictResponse({
-    description: 'Email or phone number already in use by another account',
+    description: 'Email already in use by another account',
   })
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   async updateMe(

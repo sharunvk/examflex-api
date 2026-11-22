@@ -6,6 +6,7 @@ import { UserRole } from '../../common/enums/user-role.enum';
 describe('StudentAccountResolver', () => {
   const users = {
     findByPhone: jest.fn(),
+    markPhoneVerified: jest.fn(),
     create: jest.fn(),
     findAuthByGoogleSub: jest.fn(),
     findAuthByEmail: jest.fn(),
@@ -57,6 +58,61 @@ describe('StudentAccountResolver', () => {
         phoneNumber: '+911234567890',
       });
       expect(result.isNewUser).toBe(true);
+    });
+
+    it('stamps the number as verified when an existing student signs in', async () => {
+      users.findByPhone.mockResolvedValue(student);
+      await resolver.resolve({
+        provider: StudentAuthProvider.OTP,
+        phoneNumber: student.phoneNumber,
+      });
+      expect(users.markPhoneVerified).toHaveBeenCalledWith('user-1');
+    });
+
+    it('stamps a brand-new OTP student too', async () => {
+      users.findByPhone.mockResolvedValue(null);
+      users.create.mockResolvedValue(student);
+      await resolver.resolve({
+        provider: StudentAuthProvider.OTP,
+        phoneNumber: student.phoneNumber,
+      });
+      expect(users.markPhoneVerified).toHaveBeenCalledWith('user-1');
+    });
+
+    it('never blocks sign-in when stamping fails', async () => {
+      users.findByPhone.mockResolvedValue(student);
+      users.markPhoneVerified.mockRejectedValue(new Error('mongo blip'));
+      await expect(
+        resolver.resolve({
+          provider: StudentAuthProvider.OTP,
+          phoneNumber: student.phoneNumber,
+        }),
+      ).resolves.toEqual({ user: student, isNewUser: false });
+    });
+
+    it('signs the loser of a simultaneous first sign-in into the winning account', async () => {
+      users.findByPhone
+        .mockResolvedValueOnce(null) // nobody yet when we looked
+        .mockResolvedValueOnce(student); // the other request created it
+      users.create.mockRejectedValue(new ConflictException('exists'));
+
+      const result = await resolver.resolve({
+        provider: StudentAuthProvider.OTP,
+        phoneNumber: student.phoneNumber,
+      });
+
+      expect(result).toEqual({ user: student, isNewUser: false });
+    });
+
+    it('still fails when a conflicting create has no matching account', async () => {
+      users.findByPhone.mockResolvedValue(null);
+      users.create.mockRejectedValue(new ConflictException('exists'));
+      await expect(
+        resolver.resolve({
+          provider: StudentAuthProvider.OTP,
+          phoneNumber: student.phoneNumber,
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
     it('rejects inactive students and admins', async () => {

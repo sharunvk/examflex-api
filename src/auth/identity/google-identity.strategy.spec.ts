@@ -187,6 +187,51 @@ describe('GoogleIdentityStrategy', () => {
     expect(safeHttpsAvatar(null)).toBeUndefined();
   });
 
+  describe('names supplied by Google are cleaned before they reach the database', () => {
+    const cp = (...points: number[]) => String.fromCodePoint(...points);
+    const RLO = cp(0x202e);
+    const ZWSP = cp(0x200b);
+    const ROCKET = cp(0x1f680);
+    const HAN_ASTRAL = cp(0x20bb7);
+
+    it.each([
+      [
+        'markup',
+        '<img src=x onerror=alert(1)>Rahul',
+        'img src x onerror alert(1) Rahul',
+      ],
+      ['invisible and bidi characters', `${RLO}Ra${ZWSP}hul`, 'Rahul'],
+      ['an emoji', `Rahul ${ROCKET}`, 'Rahul'],
+      ['a spreadsheet formula', '=1+1', 'ExamFlex User'],
+      ['a web address', 'www.evil.com', 'ExamFlex User'],
+    ])('%s', (_label, name, expected) => {
+      expect(displayNameFromGoogle(name, null)).toBe(expected);
+    });
+
+    it('falls back to a cleaned email name, then to a default', () => {
+      expect(displayNameFromGoogle(`${ZWSP}`, 'asha.nair@gmail.com')).toBe(
+        'asha.nair',
+      );
+      expect(displayNameFromGoogle('<>', 'we<ird@gmail.com')).toBe('we ird');
+      expect(displayNameFromGoogle('<>', '+@gmail.com')).toBe('ExamFlex User');
+    });
+
+    it('never exceeds the schema limit or splits a surrogate pair', () => {
+      expect(displayNameFromGoogle('A'.repeat(500), null)).toHaveLength(100);
+      const astral = displayNameFromGoogle(HAN_ASTRAL.repeat(90), null);
+      expect(astral.length).toBeLessThanOrEqual(100);
+      expect(() => encodeURIComponent(astral)).not.toThrow();
+    });
+
+    it('applies to the verified identity returned by sign-in', async () => {
+      verifier.verify.mockResolvedValue(
+        payload({ name: `${RLO}<b>Rahul</b>${ZWSP}` }),
+      );
+      const identity = await strategy.verify('id-token');
+      expect(identity.name).toBe('b Rahul b');
+    });
+  });
+
   it('drops a non-https picture from the verified identity', async () => {
     verifier.verify.mockResolvedValue(
       payload({ picture: 'http://evil.example/a.png', name: '' }),

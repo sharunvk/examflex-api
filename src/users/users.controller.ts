@@ -213,18 +213,18 @@ export class UsersController {
   @ApiOperation({
     summary: 'Update own profile',
     description:
-      'Single endpoint to update any combination of core identity fields (name, email) ' +
-      'and extended profile fields (bio, avatar, date of birth, gender, location, target exam). ' +
-      'Only the fields provided in the request body are updated. An email can be added once; an existing email cannot be changed (403 EMAIL_LOCKED).',
+      'Single endpoint to update the name and extended profile fields (bio, avatar, date of birth, gender, location, target exam). ' +
+      'Only the fields provided in the request body are updated. Email is not accepted here (400 EMAIL_VERIFICATION_REQUIRED): ' +
+      'add one with POST /users/me/email/verify after an email OTP.',
   })
   @ApiResponse({
     status: 200,
     description: 'Profile updated successfully',
     type: UserResponseDto,
   })
-  @ApiBadRequestResponse({ description: 'Validation failed' })
-  @ApiConflictResponse({
-    description: 'Email already in use by another account',
+  @ApiBadRequestResponse({
+    description:
+      'Validation failed, or an email was sent (EMAIL_VERIFICATION_REQUIRED)',
   })
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   async updateMe(

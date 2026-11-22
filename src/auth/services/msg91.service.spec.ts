@@ -118,5 +118,107 @@ describe('Msg91Service', () => {
         status: HttpStatus.INTERNAL_SERVER_ERROR,
       });
     });
+
+    it('rejects a token that verified an email address', async () => {
+      const service = await createService();
+      mockFetch.mockResolvedValue({
+        ok: true,
+        text: async () =>
+          JSON.stringify({ type: 'success', message: 'learner@example.com' }),
+      });
+      await expect(service.verifyAccessToken('tok')).rejects.toMatchObject({
+        status: HttpStatus.UNAUTHORIZED,
+      });
+    });
+
+    it('ignores the message of an error reply', async () => {
+      const service = await createService();
+      mockFetch.mockResolvedValue({
+        ok: true,
+        text: async () =>
+          JSON.stringify({ type: 'error', message: '9198765432100000' }),
+      });
+      await expect(service.verifyAccessToken('tok')).rejects.toMatchObject({
+        status: HttpStatus.UNAUTHORIZED,
+      });
+    });
+  });
+
+  describe('verifyEmailAccessToken', () => {
+    function reply(body: unknown) {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        text: async () =>
+          typeof body === 'string' ? body : JSON.stringify(body),
+      });
+    }
+
+    it.each([
+      ['message', { type: 'success', message: ' Learner@Example.com ' }],
+      [
+        'data.email',
+        { type: 'success', data: { email: 'learner@example.com' } },
+      ],
+      [
+        'data.identifier',
+        { type: 'success', data: { identifier: 'LEARNER@example.com' } },
+      ],
+      ['top-level email', { email: 'learner@example.com' }],
+      ['plain text', 'learner@example.com'],
+    ])('reads the email from %s and lowercases it', async (_label, body) => {
+      const service = await createService();
+      reply(body);
+      await expect(service.verifyEmailAccessToken('tok')).resolves.toBe(
+        'learner@example.com',
+      );
+    });
+
+    it('rejects a token that verified a phone number', async () => {
+      const service = await createService();
+      reply({ type: 'success', message: '919876543210' });
+      await expect(service.verifyEmailAccessToken('tok')).rejects.toMatchObject(
+        { status: HttpStatus.UNAUTHORIZED },
+      );
+    });
+
+    it('rejects an error reply', async () => {
+      const service = await createService();
+      reply({ type: 'error', message: 'learner@example.com' });
+      await expect(service.verifyEmailAccessToken('tok')).rejects.toMatchObject(
+        { status: HttpStatus.UNAUTHORIZED },
+      );
+    });
+
+    it('rejects an empty body', async () => {
+      const service = await createService();
+      reply('   ');
+      await expect(service.verifyEmailAccessToken('tok')).rejects.toMatchObject(
+        { status: HttpStatus.UNAUTHORIZED },
+      );
+    });
+
+    it('rejects a JSON null body', async () => {
+      const service = await createService();
+      reply('null');
+      await expect(service.verifyEmailAccessToken('tok')).rejects.toMatchObject(
+        { status: HttpStatus.UNAUTHORIZED },
+      );
+    });
+
+    it('throws INTERNAL_SERVER_ERROR when HTTP status is not ok', async () => {
+      const service = await createService();
+      mockFetch.mockResolvedValue({ ok: false, status: 502 });
+      await expect(service.verifyEmailAccessToken('tok')).rejects.toMatchObject(
+        { status: HttpStatus.INTERNAL_SERVER_ERROR },
+      );
+    });
+
+    it('wraps unexpected fetch errors', async () => {
+      const service = await createService();
+      mockFetch.mockRejectedValue(new Error('network'));
+      await expect(service.verifyEmailAccessToken('tok')).rejects.toMatchObject(
+        { status: HttpStatus.INTERNAL_SERVER_ERROR },
+      );
+    });
   });
 });

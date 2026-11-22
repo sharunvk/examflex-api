@@ -506,16 +506,10 @@ describe('UsersService', () => {
 
   describe('updateMe', () => {
     it('should update profile fields', async () => {
-      // An OTP sign-up still has only the placeholder email, so it may add one.
-      mockUserModel.findById.mockReturnValue(
-        chain({ email: 'user1@temp.examflex.com' }),
-      );
-      mockUserModel.findOne.mockResolvedValue(null);
       mockUserModel.findByIdAndUpdate.mockReturnValue(
         chain(
           mockUserDocument({
             name: 'New',
-            email: 'n@e.com',
             bio: 'hi',
             gender: Gender.MALE,
           }),
@@ -524,7 +518,6 @@ describe('UsersService', () => {
 
       const result = await service.updateMe(OID, {
         name: 'New',
-        email: 'n@e.com',
         phoneNumber: '+111',
         bio: 'hi',
         avatarUrl: 'http://a',
@@ -537,14 +530,13 @@ describe('UsersService', () => {
       expect(result).toBeDefined();
     });
 
-    it('should throw ConflictException', async () => {
+    it('should reject an email (it needs an OTP)', async () => {
       mockUserModel.findById.mockReturnValue(
         chain({ email: 'user1@temp.examflex.com' }),
       );
-      mockUserModel.findOne.mockResolvedValue({ _id: 'other' });
       await expect(
         service.updateMe(OID, { email: 'taken@example.com' }),
-      ).rejects.toThrow(ConflictException);
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('should throw NotFoundException', async () => {

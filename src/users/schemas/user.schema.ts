@@ -163,6 +163,14 @@ export class User {
   @Prop()
   phoneVerifiedAt?: Date;
 
+  /**
+   * When ownership of `email` was proven with an email OTP (MSG91) from the
+   * profile page. Google-linked accounts count as verified without it, because
+   * Google only shares verified addresses.
+   */
+  @Prop()
+  emailVerifiedAt?: Date;
+
   /** When the learner finished the mandatory name + mobile + target exam step. */
   @Prop()
   onboardingCompletedAt?: Date;

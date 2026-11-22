@@ -1,7 +1,6 @@
 import {
   IsOptional,
   IsString,
-  IsEmail,
   IsEnum,
   IsDateString,
   MinLength,
@@ -24,8 +23,9 @@ import { LocationDto } from './update-profile.dto';
  * request — so the frontend needs just one PATCH /users/me call.
  *
  * Note: the phone number is intentionally absent. It can only be set by
- * proving ownership with an OTP (POST /users/me/phone/verify). Email uniqueness
- * is enforced at the service layer.
+ * proving ownership with an OTP (POST /users/me/phone/verify). The email is
+ * likewise only set through POST /users/me/email/verify; it stays on this DTO
+ * so older clients that still send it get a clear EMAIL_VERIFICATION_REQUIRED.
  */
 export class UpdateMeDto {
   // ── Core identity ─────────────────────────────────────────────────────────
@@ -42,15 +42,12 @@ export class UpdateMeDto {
   name?: string;
 
   @ApiPropertyOptional({
-    description: 'Email address',
-    example: 'rahul@example.com',
+    description:
+      'Not accepted: always rejected with EMAIL_VERIFICATION_REQUIRED. Use POST /users/me/email/verify.',
+    deprecated: true,
   })
   @IsOptional()
-  @IsEmail({}, { message: 'Please provide a valid email address' })
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim().toLowerCase() : value,
-  )
-  email?: string;
+  email?: unknown;
 
   // ── Extended profile ──────────────────────────────────────────────────────
 

@@ -64,6 +64,22 @@ export class AnalysisLatestFullMockDto {
 
   @ApiPropertyOptional()
   skippedCount?: number;
+
+  @ApiPropertyOptional({ description: 'Marks for a correct answer' })
+  marksPerCorrect?: number;
+
+  @ApiPropertyOptional({
+    description: 'Marks lost per wrong answer (positive)',
+  })
+  negativeMarking?: number;
+
+  @ApiPropertyOptional({ description: 'Allotted paper duration in minutes' })
+  durationInMinutes?: number;
+
+  @ApiPropertyOptional({
+    description: 'Time used on the attempt, excluding pauses',
+  })
+  timeTakenSeconds?: number;
 }
 
 export class AnalysisFullMocksSectionDto {

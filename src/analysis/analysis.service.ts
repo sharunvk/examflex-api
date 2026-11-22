@@ -51,6 +51,9 @@ type LeanAttempt = {
   score: number;
   totalQuestions: number;
   marksPerQuestion: number;
+  negativeMarking?: number;
+  durationInMinutes?: number;
+  timeConsumed?: number;
   submittedAt?: Date;
   subject?: Types.ObjectId;
   topic?: Types.ObjectId;
@@ -250,7 +253,7 @@ export class AnalysisService {
       .sort({ submittedAt: -1 })
       .limit(PATHWAY_ATTEMPT_WINDOW)
       .select(
-        'mockTest testTitle score totalQuestions marksPerQuestion submittedAt questions',
+        'mockTest testTitle score totalQuestions marksPerQuestion negativeMarking durationInMinutes timeConsumed submittedAt questions',
       )
       .lean<LeanAttempt[]>()
       .exec();
@@ -474,6 +477,18 @@ export class AnalysisService {
       ...(correctCount !== undefined ? { correctCount } : {}),
       ...(incorrectCount !== undefined ? { incorrectCount } : {}),
       ...(skippedCount !== undefined ? { skippedCount } : {}),
+      ...(latestRow?.marksPerQuestion
+        ? { marksPerCorrect: latestRow.marksPerQuestion }
+        : {}),
+      ...(latestRow?.negativeMarking !== undefined
+        ? { negativeMarking: Math.abs(latestRow.negativeMarking) }
+        : {}),
+      ...(latestRow?.durationInMinutes
+        ? { durationInMinutes: latestRow.durationInMinutes }
+        : {}),
+      ...(latestRow?.timeConsumed !== undefined
+        ? { timeTakenSeconds: Math.max(0, Math.round(latestRow.timeConsumed)) }
+        : {}),
     };
   }
 

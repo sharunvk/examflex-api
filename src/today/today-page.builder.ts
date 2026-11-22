@@ -134,10 +134,10 @@ function buildSessionPlan(
   // All steps stay visually "active" for now; wire real progress later.
   if (mode === 'empty' || !hasFullMocks) {
     return {
-      eyebrow: 'TODAY, KEEP IT LIGHT',
+      eyebrow: 'START WITH A BREATH',
       title: 'Your 20-minute reset',
       steps: [
-        step('01', 'Take your first mock', 'active'),
+        step('01', 'Take a chapter-wise mock', 'active'),
         step('02', 'Understand your saved mistakes', 'active'),
         step('03', 'Recall your first equations', 'active'),
       ],
@@ -145,7 +145,7 @@ function buildSessionPlan(
   }
 
   const steps: TodaySessionStepDto[] = [
-    step('01', 'Take your first mock', 'active'),
+    step('01', 'Take a chapter-wise mock', 'active'),
   ];
 
   if (totalMistakes > 0) {
@@ -164,7 +164,7 @@ function buildSessionPlan(
   }
 
   return {
-    eyebrow: 'TODAY, KEEP IT LIGHT',
+    eyebrow: 'START WITH A BREATH',
     title: 'Your 20-minute reset',
     steps,
   };

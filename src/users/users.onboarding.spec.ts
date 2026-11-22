@@ -360,4 +360,72 @@ describe('UsersService: verified phone + onboarding', () => {
       });
     });
   });
+  describe('an email can be added once, never swapped', () => {
+    beforeEach(() => {
+      model.findOne.mockImplementation(() => chain(null)); // nobody else owns it
+      model.findByIdAndUpdate.mockReset();
+      model.findByIdAndUpdate.mockImplementation(() => chain(userDoc({})));
+    });
+
+    const currentEmail = (email: string | undefined) =>
+      model.findById.mockImplementation(() => chain({ email }));
+
+    it('refuses to change an existing real email, and writes nothing', async () => {
+      currentEmail('asha@gmail.com');
+      await expect(
+        service.updateMe(OID, { email: 'someone.else@example.com' } as never),
+      ).rejects.toMatchObject({ response: { error: 'EMAIL_LOCKED' } });
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('answers 403, so it cannot be mistaken for a bad token or a conflict', async () => {
+      currentEmail('asha@gmail.com');
+      await expect(
+        service.updateMe(OID, { email: 'x@example.com' } as never),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets the same email through (re-saving a form), ignoring case', async () => {
+      currentEmail('Asha@Gmail.com');
+      await service.updateMe(OID, {
+        email: 'asha@gmail.com',
+        name: 'Asha K',
+      } as never);
+      expect(model.findByIdAndUpdate).toHaveBeenCalled();
+    });
+
+    it.each([
+      ['an OTP placeholder', 'user919876543210@temp.examflex.com'],
+      ['an uppercase placeholder', 'USER9198@TEMP.EXAMFLEX.COM'],
+      ['no email on record', undefined],
+      ['an empty email on record', ''],
+    ])('lets a learner with %s add their own', async (_label, email) => {
+      currentEmail(email);
+      await service.updateMe(OID, { email: 'riya@example.com' } as never);
+      expect(model.findByIdAndUpdate.mock.calls[0][1].$set).toMatchObject({
+        email: 'riya@example.com',
+      });
+    });
+
+    it('still refuses an address another account already owns', async () => {
+      currentEmail('user9198@temp.examflex.com');
+      model.findOne.mockImplementation(() => chain({ _id: 'someone-else' }));
+      await expect(
+        service.updateMe(OID, { email: 'taken@example.com' } as never),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('does not even look up the email when it is not being edited', async () => {
+      await service.updateMe(OID, { name: 'Renamed' } as never);
+      expect(model.findById).not.toHaveBeenCalled();
+      expect(model.findByIdAndUpdate).toHaveBeenCalled();
+    });
+
+    it('404s for an unknown account', async () => {
+      model.findById.mockImplementation(() => chain(null));
+      await expect(
+        service.updateMe(OID, { email: 'x@example.com' } as never),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
 });

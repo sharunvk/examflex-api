@@ -1,3 +1,4 @@
+import { placeholderEmailFor } from '../../users/placeholder-email';
 import {
   ConflictException,
   Injectable,
@@ -50,7 +51,7 @@ export class StudentAccountResolver {
     }
 
     const tempName = `User ${phoneNumber.slice(-4)}`;
-    const tempEmail = `user${phoneNumber.replace(/\D/g, '')}@temp.examflex.com`;
+    const tempEmail = placeholderEmailFor(phoneNumber);
     const createUserDto: CreateUserDto = {
       name: tempName,
       email: tempEmail,

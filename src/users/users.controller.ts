@@ -215,7 +215,7 @@ export class UsersController {
     description:
       'Single endpoint to update any combination of core identity fields (name, email) ' +
       'and extended profile fields (bio, avatar, date of birth, gender, location, target exam). ' +
-      'Only the fields provided in the request body are updated.',
+      'Only the fields provided in the request body are updated. An email can be added once; an existing email cannot be changed (403 EMAIL_LOCKED).',
   })
   @ApiResponse({
     status: 200,

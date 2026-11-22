@@ -1,3 +1,4 @@
+import { coerceProvidedName } from '../../common/person-name';
 import {
   Injectable,
   ServiceUnavailableException,
@@ -142,13 +143,15 @@ export function displayNameFromGoogle(
   name?: string | null,
   email?: string | null,
 ): string {
-  const cleaned = (name ?? '').replace(/\s+/g, ' ').trim().slice(0, 100);
+  // Google lets people choose almost any display name. We cannot reject it
+  // (that would block sign-in), so clean it into the allowed alphabet instead.
+  const cleaned = coerceProvidedName(name);
   if (cleaned.length >= 1) {
     return cleaned;
   }
 
-  const local = (email ?? '').split('@')[0]?.trim().slice(0, 100);
-  if (local && local.length >= 2) {
+  const local = coerceProvidedName((email ?? '').split('@')[0]);
+  if (local.length >= 2) {
     return local;
   }
 

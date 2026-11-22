@@ -6,6 +6,7 @@ import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './users/users.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
 import { FeedbackModule } from './feedback/feedback.module';
 import { CounselingModule } from './counseling/counseling.module';
 import { AuthModule } from './auth/auth.module';
@@ -115,6 +116,7 @@ const observeRootModule = createObserveRootModule();
     // Custom validation module
     ValidationModule,
     UsersModule,
+    OnboardingModule,
     FeedbackModule,
     CounselingModule,
     AuthModule,

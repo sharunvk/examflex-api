@@ -43,6 +43,6 @@ import { UsersModule } from '../users/users.module';
     StudentSessionService,
     JwtStrategy,
   ],
-  exports: [AuthService, JwtModule, PassportModule],
+  exports: [AuthService, Msg91Service, JwtModule, PassportModule],
 })
 export class AuthModule {}

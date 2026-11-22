@@ -380,6 +380,8 @@ describe('UsersService', () => {
           $unset: {
             phoneNumber: 1,
             googleSub: 1,
+            phoneVerifiedAt: 1,
+            onboardingCompletedAt: 1,
           },
         },
         { new: true },

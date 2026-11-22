@@ -360,7 +360,7 @@ describe('UsersService: verified phone + onboarding', () => {
       });
     });
   });
-  describe('an email can be added once, never swapped', () => {
+  describe('an email is only added by proving it with an OTP', () => {
     beforeEach(() => {
       model.findOne.mockImplementation(() => chain(null)); // nobody else owns it
       model.findByIdAndUpdate.mockReset();
@@ -370,55 +370,51 @@ describe('UsersService: verified phone + onboarding', () => {
     const currentEmail = (email: string | undefined) =>
       model.findById.mockImplementation(() => chain({ email }));
 
-    it('refuses to change an existing real email, and writes nothing', async () => {
-      currentEmail('asha@gmail.com');
-      await expect(
-        service.updateMe(OID, { email: 'someone.else@example.com' } as never),
-      ).rejects.toMatchObject({ response: { error: 'EMAIL_LOCKED' } });
-      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
-    });
+    it.each([
+      [
+        'a new address on a placeholder account',
+        'user9198@temp.examflex.com',
+        'riya@example.com',
+      ],
+      [
+        'a new address on an account without one',
+        undefined,
+        'riya@example.com',
+      ],
+      [
+        'a different address on a real-email account',
+        'asha@gmail.com',
+        'riya@example.com',
+      ],
+      [
+        'the placeholder itself',
+        'user9198@temp.examflex.com',
+        'user9198@temp.examflex.com',
+      ],
+      ['an empty string', 'asha@gmail.com', ''],
+      ['a non-string', 'asha@gmail.com', 42],
+    ])(
+      'PATCH /users/me refuses %s, and writes nothing',
+      async (_l, current, email) => {
+        currentEmail(current);
+        await expect(
+          service.updateMe(OID, { email, name: 'Asha K' } as never),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: { error: 'EMAIL_VERIFICATION_REQUIRED' },
+        });
+        expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+      },
+    );
 
-    it('answers 403, so it cannot be mistaken for a bad token or a conflict', async () => {
-      currentEmail('asha@gmail.com');
-      await expect(
-        service.updateMe(OID, { email: 'x@example.com' } as never),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-    });
-
-    it('lets the same email through (re-saving a form), ignoring case', async () => {
+    it('ignores the current email re-sent with the form (any case), and saves the rest', async () => {
       currentEmail('Asha@Gmail.com');
       await service.updateMe(OID, {
-        email: 'asha@gmail.com',
+        email: ' asha@gmail.com ',
         name: 'Asha K',
       } as never);
-      expect(model.findByIdAndUpdate).toHaveBeenCalled();
-    });
-
-    it.each([
-      ['an OTP placeholder', 'user919876543210@temp.examflex.com'],
-      ['an uppercase placeholder', 'USER9198@TEMP.EXAMFLEX.COM'],
-      ['no email on record', undefined],
-      ['an empty email on record', ''],
-    ])('lets a learner with %s add their own', async (_label, email) => {
-      currentEmail(email);
-      await service.updateMe(OID, { email: 'riya@example.com' } as never);
-      expect(model.findByIdAndUpdate.mock.calls[0][1].$set).toMatchObject({
-        email: 'riya@example.com',
-      });
-    });
-
-    it('still refuses an address another account already owns', async () => {
-      currentEmail('user9198@temp.examflex.com');
-      model.findOne.mockImplementation(() => chain({ _id: 'someone-else' }));
-      await expect(
-        service.updateMe(OID, { email: 'taken@example.com' } as never),
-      ).rejects.toBeInstanceOf(ConflictException);
-    });
-
-    it('does not even look up the email when it is not being edited', async () => {
-      await service.updateMe(OID, { name: 'Renamed' } as never);
-      expect(model.findById).not.toHaveBeenCalled();
-      expect(model.findByIdAndUpdate).toHaveBeenCalled();
+      const [, update] = model.findByIdAndUpdate.mock.calls[0];
+      expect(update.$set).toEqual({ name: 'Asha K' });
     });
 
     it('404s for an unknown account', async () => {
@@ -426,6 +422,109 @@ describe('UsersService: verified phone + onboarding', () => {
       await expect(
         service.updateMe(OID, { email: 'x@example.com' } as never),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('does not even look up the email when it is not being edited', async () => {
+      await service.updateMe(OID, { name: 'Renamed' } as never);
+      expect(model.findById).not.toHaveBeenCalled();
+      expect(model.findByIdAndUpdate).toHaveBeenCalled();
+    });
+  });
+
+  describe('setVerifiedEmail', () => {
+    beforeEach(() => {
+      model.findOne.mockImplementation(() => chain(null));
+    });
+
+    it.each([
+      ['an OTP placeholder', 'user919876543210@temp.examflex.com'],
+      ['an uppercase placeholder', 'USER9198@TEMP.EXAMFLEX.COM'],
+      ['no email on record', undefined],
+      ['an empty email on record', ''],
+    ])('attaches and stamps the address for %s', async (_label, email) => {
+      stubUser({ email });
+      await service.setVerifiedEmail(OID, ' Riya@Example.com ');
+      const [, update] = model.updateOne.mock.calls[0];
+      expect(update.$set.email).toBe('riya@example.com');
+      expect(update.$set.emailVerifiedAt).toBeInstanceOf(Date);
+    });
+
+    it('stamps the same real address again, ignoring case', async () => {
+      stubUser({ email: 'Asha@Gmail.com' });
+      await service.setVerifiedEmail(OID, 'asha@gmail.com');
+      expect(model.updateOne).toHaveBeenCalled();
+    });
+
+    it('refuses to swap an existing real email', async () => {
+      stubUser({ email: 'asha@gmail.com' });
+      await expect(
+        service.setVerifiedEmail(OID, 'someone.else@example.com'),
+      ).rejects.toMatchObject({ response: { error: 'EMAIL_ALREADY_SET' } });
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('refuses an address another account owns', async () => {
+      stubUser({ email: 'user9198@temp.examflex.com' });
+      model.findOne.mockImplementation(() => chain({ _id: 'someone-else' }));
+      await expect(
+        service.setVerifiedEmail(OID, 'taken@example.com'),
+      ).rejects.toMatchObject({ response: { error: 'EMAIL_IN_USE' } });
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('maps a duplicate-key race to EMAIL_IN_USE', async () => {
+      stubUser({ email: 'user9198@temp.examflex.com' });
+      model.updateOne.mockReturnValue({
+        exec: jest.fn().mockRejectedValue({ code: 11000 }),
+      });
+      await expect(
+        service.setVerifiedEmail(OID, 'taken@example.com'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rethrows other write errors', async () => {
+      stubUser({ email: 'user9198@temp.examflex.com' });
+      model.updateOne.mockReturnValue({
+        exec: jest.fn().mockRejectedValue(new Error('db down')),
+      });
+      await expect(
+        service.setVerifiedEmail(OID, 'riya@example.com'),
+      ).rejects.toThrow('db down');
+    });
+
+    it.each([
+      ['unknown', null],
+      ['deleted', { isDeleted: true }],
+      ['deactivated', { isActive: false }],
+    ])('404s for a %s account', async (_label, data) => {
+      model.findById.mockImplementation(() =>
+        chain(data === null ? null : userDoc(data)),
+      );
+      await expect(
+        service.setVerifiedEmail(OID, 'riya@example.com'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('emailVerified in responses', () => {
+    it.each([
+      ['a real email with no proof', {}, false],
+      ['an OTP-verified email', { emailVerifiedAt: new Date() }, true],
+      ['a Google-linked email', { googleSub: 'g-123' }, true],
+      [
+        'a stamped placeholder',
+        {
+          email: 'user9198@temp.examflex.com',
+          emailVerifiedAt: new Date(),
+        },
+        false,
+      ],
+      ['no email at all', { email: undefined, googleSub: 'g-1' }, false],
+    ])('%s', async (_label, data, expected) => {
+      stubUser(data as Record<string, unknown>);
+      const result = await service.findOne(OID);
+      expect(result.emailVerified).toBe(expected);
+      expect(result).not.toHaveProperty('emailVerifiedAt');
     });
   });
 });

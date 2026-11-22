@@ -21,6 +21,7 @@ import { GetUser } from '../auth/decorators/get-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { CompleteOnboardingDto } from './dto/complete-onboarding.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
 import { VerifyPhoneDto } from './dto/verify-phone.dto';
 import { OnboardingService } from './onboarding.service';
 
@@ -28,11 +29,11 @@ import { OnboardingService } from './onboarding.service';
 @ApiBearerAuth('JWT-auth')
 @Controller('users/me')
 @UseGuards(JwtAuthGuard)
-@AllowIncompleteProfile()
 export class OnboardingController {
   constructor(private readonly onboarding: OnboardingService) {}
 
   @Post('phone/verify')
+  @AllowIncompleteProfile()
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({
@@ -54,7 +55,31 @@ export class OnboardingController {
     return { message: 'Mobile number verified', data };
   }
 
+  // Profile page only: stays behind the onboarding gate (no @AllowIncompleteProfile).
+  @Post('email/verify')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'Verify and attach an email address',
+    description:
+      'Takes the access token from the MSG91 OTP widget (email channel), verifies it with MSG91 and attaches the verified address to the caller. Only for accounts without a real email. The address is read from MSG91, never from the request.',
+  })
+  @ApiResponse({ status: 200, type: UserResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid or expired verification' })
+  @ApiConflictResponse({
+    description:
+      'Address belongs to another account, or the account already has a different email',
+  })
+  async verifyEmail(
+    @GetUser() user: UserResponseDto,
+    @Body() dto: VerifyEmailDto,
+  ): Promise<{ message: string; data: UserResponseDto }> {
+    const data = await this.onboarding.verifyEmail(user.id, dto.accessToken);
+    return { message: 'Email verified', data };
+  }
+
   @Post('onboarding')
+  @AllowIncompleteProfile()
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({

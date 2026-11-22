@@ -82,13 +82,20 @@ Every existing student sees the onboarding screen once after the release (the AP
 
 ### Other places that touch the number
 
-- `PATCH /users/me`: an email can be **added once** (mobile-OTP sign-ups start with only a placeholder `@temp.examflex.com` address), but an existing real email is fixed: `403 EMAIL_LOCKED`. The profile page shows both the mobile and an existing email as disabled fields. Google sign-in links accounts by email, so an unverified swap could take over, or lock out, someone else's address.
+- `PATCH /users/me` no longer accepts a new or different `email`: `400 EMAIL_VERIFICATION_REQUIRED` (re-sending the current email is ignored). Google sign-in links accounts by email, so an unproven address could capture someone else's Google sign-in. See "Email verification" below.
+- The profile page shows the mobile and an existing real email as disabled fields.
 - `PATCH /users/:id` (admin): changing the number removes `phoneVerifiedAt`. Re-saving the same number keeps it.
 - Deleting an account removes `phoneVerifiedAt` and `onboardingCompletedAt` with the number; a restored account verifies and onboards again.
 - `POST /users/me/onboarding` is first-run only: for a learner who already finished it changes nothing.
 
 A first-time OTP sign-in that races another for the same number now signs the
 loser into the winner's account instead of failing.
+
+## Email verification (profile page)
+
+Mobile-OTP learners add an email only by proving it with an email OTP. See
+[EMAIL_VERIFICATION.md](EMAIL_VERIFICATION.md) for the design, API contract and
+regression boundaries.
 
 ## Web (examflex-app)
 

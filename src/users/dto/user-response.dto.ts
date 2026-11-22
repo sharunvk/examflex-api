@@ -83,6 +83,14 @@ export class UserResponseDto {
 
   @ApiProperty({
     description:
+      'True once the email has been proven with an email OTP, or comes from a linked Google account. Always false for the placeholder email of mobile-only accounts.',
+    example: true,
+  })
+  @Expose()
+  emailVerified: boolean;
+
+  @ApiProperty({
+    description:
       'True once the learner has completed the mandatory name + mobile + target exam step.',
     example: true,
   })

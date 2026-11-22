@@ -28,6 +28,10 @@ describe('profile gate wiring', () => {
     expect(isOpen(OnboardingController, 'complete')).toBe(true);
   });
 
+  it('keeps email verification gated (profile page only)', () => {
+    expect(isOpen(OnboardingController, 'verifyEmail')).toBe(false);
+  });
+
   it.each([
     'updateMe',
     'updateMyPreferences',

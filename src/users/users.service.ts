@@ -536,13 +536,14 @@ export class UsersService {
    * profile fields (bio, avatar, location, target exam, etc.) in one DB write.
    */
   async updateMe(id: string, dto: UpdateMeDto): Promise<UserResponseDto> {
-    // The phone number is deliberately not editable here: it can only be set by
-    // proving ownership with an OTP (see setVerifiedPhone).
+    // Neither contact field is editable here. The phone number can only be set
+    // by proving ownership with an OTP (see setVerifiedPhone), and so can the
+    // email (see setVerifiedEmail): Google sign-in links accounts by email, so
+    // an unproven address could capture someone else's Google sign-in.
     //
-    // An email can be ADDED once (OTP sign-ups start with only a placeholder),
-    // but an existing one is fixed: Google sign-in links accounts by email, so
-    // an unverified swap could take over, or lock out, someone else's address.
-    if (dto.email) {
+    // Re-sending the account's current real email (a client that always posts
+    // the whole form) is accepted and ignored, so those saves keep working.
+    if (dto.email !== undefined) {
       const current = await this.userModel
         .findById(id)
         .select('email')
@@ -551,23 +552,19 @@ export class UsersService {
       if (!current) {
         throw new NotFoundException(`User with ID "${id}" not found`);
       }
-      const hasRealEmail =
-        Boolean(current.email) && !isPlaceholderEmail(current.email);
-      if (hasRealEmail && current.email.toLowerCase() !== dto.email) {
-        throw new ForbiddenException({
-          statusCode: 403,
-          error: 'EMAIL_LOCKED',
-          message: 'Your email address can’t be changed.',
+      const sent =
+        typeof dto.email === 'string' ? dto.email.trim().toLowerCase() : null;
+      const unchanged =
+        sent !== null &&
+        Boolean(current.email) &&
+        !isPlaceholderEmail(current.email) &&
+        current.email.toLowerCase() === sent;
+      if (!unchanged) {
+        throw new BadRequestException({
+          statusCode: 400,
+          error: 'EMAIL_VERIFICATION_REQUIRED',
+          message: 'Verify your email with a code to add it.',
         });
-      }
-
-      // Uniqueness check (exclude the caller's own document).
-      const conflict = await this.userModel.findOne({
-        _id: { $ne: id },
-        email: dto.email,
-      });
-      if (conflict) {
-        throw new ConflictException('Another account already uses this email');
       }
     }
 
@@ -576,7 +573,6 @@ export class UsersService {
 
     // Core identity
     if (dto.name !== undefined) $set.name = dto.name;
-    if (dto.email !== undefined) $set.email = dto.email;
 
     // Extended profile
     if (dto.bio !== undefined) $set.bio = dto.bio;
@@ -853,6 +849,67 @@ export class UsersService {
         }
         throw error;
       }
+    }
+
+    return this.findOne(userId);
+  }
+
+  /**
+   * Attach an email whose ownership was just proven by an email OTP.
+   *
+   * - Only accounts without a real email (none, or the mobile-sign-up
+   *   placeholder) may add one. The same address again just marks it verified.
+   * - A different real email already on the account: 409.
+   * - Another account owns the address: 409 (also enforced by the unique index,
+   *   which covers two requests racing).
+   */
+  async setVerifiedEmail(
+    userId: string,
+    email: string,
+  ): Promise<UserResponseDto> {
+    const user = await this.userModel.findById(userId).exec();
+    if (!user || user.isDeleted || !user.isActive) {
+      throw new NotFoundException(`User with ID "${userId}" not found`);
+    }
+
+    const normalized = email.trim().toLowerCase();
+    const hasRealEmail = Boolean(user.email) && !isPlaceholderEmail(user.email);
+    if (hasRealEmail && user.email.toLowerCase() !== normalized) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'EMAIL_ALREADY_SET',
+        message: 'This account already has an email address.',
+      });
+    }
+
+    const emailInUse = () =>
+      new ConflictException({
+        statusCode: 409,
+        error: 'EMAIL_IN_USE',
+        message: 'This email belongs to another ExamFlex account.',
+      });
+
+    const owner = await this.userModel
+      .findOne({ email: normalized, _id: { $ne: user._id } })
+      .select('_id')
+      .lean()
+      .exec();
+    if (owner) {
+      throw emailInUse();
+    }
+
+    try {
+      await this.userModel
+        .updateOne(
+          { _id: user._id },
+          { $set: { email: normalized, emailVerifiedAt: new Date() } },
+        )
+        .exec();
+    } catch (error) {
+      if ((error as { code?: number })?.code === 11000) {
+        throw emailInUse();
+      }
+      throw error;
     }
 
     return this.findOne(userId);
@@ -1137,7 +1194,13 @@ export class UsersService {
     obj.onboardingCompleted = onboardingCompleted;
     obj.profileComplete =
       obj.role === UserRole.ADMIN || (phoneVerified && onboardingCompleted);
+    // Google only shares verified addresses, so a linked Google account counts.
+    obj.emailVerified =
+      typeof obj.email === 'string' &&
+      !isPlaceholderEmail(obj.email) &&
+      Boolean(obj.emailVerifiedAt || obj.googleSub);
     delete obj.phoneVerifiedAt;
+    delete obj.emailVerifiedAt;
     delete obj.onboardingCompletedAt;
 
     // Never leak password hashes, the Google subject, checkout billing,

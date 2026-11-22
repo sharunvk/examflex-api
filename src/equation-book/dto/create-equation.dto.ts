@@ -1,11 +1,14 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsInt,
   IsMongoId,
   IsNotEmpty,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -77,6 +80,20 @@ export class CreateEquationDto {
   @ValidateNested()
   @Type(() => ImageMetadataDto)
   image?: ImageMetadataDto | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Display priority. Higher numbers appear first in the equation list (2 before 1 before 0). Defaults to 0.',
+    example: 0,
+    minimum: 0,
+    maximum: 1000,
+    default: 0,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1000)
+  sortOrder?: number;
 
   @ApiProperty({
     description: 'Subject ID',

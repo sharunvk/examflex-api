@@ -100,11 +100,6 @@ export class StudentSessionService {
     private readonly keys: RedisKeyBuilder,
   ) {}
 
-  /** Idle window for a new session of this client type. */
-  ttlSecFor(client: AuthClient): number {
-    return sessionPolicyFor(client).idleTtlSec;
-  }
-
   /**
    * Create a session in Redis. Throws 503 when the store is unavailable;
    * a login is never completed without a revocable session.

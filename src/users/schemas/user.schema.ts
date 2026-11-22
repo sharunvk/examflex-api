@@ -273,8 +273,8 @@ export const UserSchema = SchemaFactory.createForClass(User);
 
 // ─── Indexes ───────────────────────────────────────────────────────────────────
 // Unique across accounts. Partial so users without a number (and soft-deleted
-// users, whose number is unset) never collide. Replaces the older non-unique
-// sparse `phoneNumber_1` index: run `npm run users:migrate-phone-index` to swap it.
+// users, whose number is unset) never collide. Built by Mongoose on boot; that
+// fails silently if duplicate numbers ever exist, so check `db.users.getIndexes()`.
 UserSchema.index(
   { phoneNumber: 1 },
   {

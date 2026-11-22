@@ -61,39 +61,28 @@ deliberate, reviewed change.
 signed-in user could save any number unverified, and phone sign-in finds accounts
 by number, so that was an account-mix-up / squatting hole.
 
-`phoneNumber` now has a **unique, partial index** (`phoneNumber_unique`). Mongoose creates
-it on boot, but **auto-indexing fails silently when duplicates exist**, so the app would run
-without the constraint. The migration script checks first and replaces the old non-unique
-`phoneNumber_1` index:
+`phoneNumber` now has a **unique, partial index** (`phoneNumber_unique`), built by Mongoose
+on boot. **Auto-indexing fails silently when duplicate numbers exist**, so the app would run
+without the constraint. If you ever suspect that, check `db.users.getIndexes()` for
+`phoneNumber_unique`, and look for duplicates with:
 
 ```
-npm run users:migrate-phone-index                        # dry run: reads only, writes nothing
-npm run users:migrate-phone-index -- --apply             # create phoneNumber_unique, then drop phoneNumber_1
-npm run users:migrate-phone-index -- --apply --stamp-otp-phones
+db.users.aggregate([
+  { $match: { phoneNumber: { $type: "string" } } },
+  { $group: { _id: "$phoneNumber", n: { $sum: 1 } } },
+  { $match: { n: { $gt: 1 } } },
+])
 ```
 
-- It refuses to change anything while duplicate numbers exist (exit code 1) and lists them masked.
-- `--stamp-otp-phones` stamps `phoneVerifiedAt` (= the account's `createdAt`) on accounts created
-  by mobile-OTP sign-in (placeholder `@temp.examflex.com` email, no Google link). They proved that
-  number when they signed in, so they are not asked to verify it again. Everyone still completes
-  name + target exam on first run. Google accounts, admins and deleted accounts are never stamped.
-- Safe to re-run. The database URI is never printed.
-
-### Production rollout order
-
-1. Run the **dry run** against production. Fix any duplicates it lists.
-2. Deploy the API and the web app **together**.
-3. Run `--apply --stamp-otp-phones` (or `--apply` alone).
-4. Remove the script and the `users:migrate-phone-index` npm entry once it has run.
-
-Deploy *before* step 3, or run step 3 with no old API instance left to restart: an old build
-still declares the `phoneNumber_1` index and would recreate it on boot.
+The one-off migration that replaced the old non-unique `phoneNumber_1` index (and optionally
+stamped OTP-created accounts as verified) has been run and removed.
 
 Every existing student sees the onboarding screen once after the release (the API returns
 403 `PROFILE_INCOMPLETE` for everything else until they finish). Admins are never gated.
 
 ### Other places that touch the number
 
+- `PATCH /users/me`: an email can be **added once** (mobile-OTP sign-ups start with only a placeholder `@temp.examflex.com` address), but an existing real email is fixed: `403 EMAIL_LOCKED`. The profile page shows both the mobile and an existing email as disabled fields. Google sign-in links accounts by email, so an unverified swap could take over, or lock out, someone else's address.
 - `PATCH /users/:id` (admin): changing the number removes `phoneVerifiedAt`. Re-saving the same number keeps it.
 - Deleting an account removes `phoneVerifiedAt` and `onboardingCompletedAt` with the number; a restored account verifies and onboards again.
 - `POST /users/me/onboarding` is first-run only: for a learner who already finished it changes nothing.

@@ -25,6 +25,7 @@ import { UpdatePreferencesDto } from './dto/update-preferences.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UserRole } from '../common/enums/user-role.enum';
+import { isPlaceholderEmail } from './placeholder-email';
 import { OrderStatus } from '../common/enums/order-status.enum';
 import { TaxInvoiceStatus } from '../common/enums/tax-invoice-status.enum';
 import { Order, OrderDocument } from '../orders/schemas/order.schema';
@@ -535,10 +536,32 @@ export class UsersService {
    * profile fields (bio, avatar, location, target exam, etc.) in one DB write.
    */
   async updateMe(id: string, dto: UpdateMeDto): Promise<UserResponseDto> {
-    // Uniqueness check for email (exclude the caller's own document). The phone
-    // number is deliberately not editable here: it can only be set by proving
-    // ownership with an OTP (see setVerifiedPhone).
+    // The phone number is deliberately not editable here: it can only be set by
+    // proving ownership with an OTP (see setVerifiedPhone).
+    //
+    // An email can be ADDED once (OTP sign-ups start with only a placeholder),
+    // but an existing one is fixed: Google sign-in links accounts by email, so
+    // an unverified swap could take over, or lock out, someone else's address.
     if (dto.email) {
+      const current = await this.userModel
+        .findById(id)
+        .select('email')
+        .lean()
+        .exec();
+      if (!current) {
+        throw new NotFoundException(`User with ID "${id}" not found`);
+      }
+      const hasRealEmail =
+        Boolean(current.email) && !isPlaceholderEmail(current.email);
+      if (hasRealEmail && current.email.toLowerCase() !== dto.email) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          error: 'EMAIL_LOCKED',
+          message: 'Your email address can’t be changed.',
+        });
+      }
+
+      // Uniqueness check (exclude the caller's own document).
       const conflict = await this.userModel.findOne({
         _id: { $ne: id },
         email: dto.email,

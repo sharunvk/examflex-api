@@ -506,6 +506,10 @@ describe('UsersService', () => {
 
   describe('updateMe', () => {
     it('should update profile fields', async () => {
+      // An OTP sign-up still has only the placeholder email, so it may add one.
+      mockUserModel.findById.mockReturnValue(
+        chain({ email: 'user1@temp.examflex.com' }),
+      );
       mockUserModel.findOne.mockResolvedValue(null);
       mockUserModel.findByIdAndUpdate.mockReturnValue(
         chain(
@@ -534,6 +538,9 @@ describe('UsersService', () => {
     });
 
     it('should throw ConflictException', async () => {
+      mockUserModel.findById.mockReturnValue(
+        chain({ email: 'user1@temp.examflex.com' }),
+      );
       mockUserModel.findOne.mockResolvedValue({ _id: 'other' });
       await expect(
         service.updateMe(OID, { email: 'taken@example.com' }),

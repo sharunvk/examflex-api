@@ -65,6 +65,13 @@ export class Equation {
   })
   exams: Types.ObjectId[];
 
+  /**
+   * Display priority. Higher numbers are listed first (2 before 1 before 0).
+   * Equations sharing a value have no guaranteed relative order.
+   */
+  @Prop({ type: Number, default: 0 })
+  sortOrder: number;
+
   @Prop({ default: true })
   isActive: boolean;
 

@@ -62,6 +62,7 @@ export class EquationBookService {
       subject: new Types.ObjectId(dto.subject),
       topic: new Types.ObjectId(dto.topic),
       exams: dto.exams.map(id => new Types.ObjectId(id)),
+      sortOrder: dto.sortOrder ?? 0,
       ...(image ? { image } : {}),
       ...createdByFields(actorUserId),
     });
@@ -114,7 +115,7 @@ export class EquationBookService {
     const [rows, total] = await Promise.all([
       this.equationModel
         .find(query)
-        .sort({ updatedAt: -1, title: 1 })
+        .sort({ sortOrder: -1, updatedAt: -1, title: 1 })
         .skip(skip)
         .limit(validLimit)
         .populate('subject', 'name')
@@ -198,6 +199,7 @@ export class EquationBookService {
     if (dto.image !== undefined) {
       updateData.image = this.sanitizeImage(dto.image);
     }
+    if (dto.sortOrder !== undefined) updateData.sortOrder = dto.sortOrder;
     if (dto.subject) updateData.subject = new Types.ObjectId(dto.subject);
     if (dto.topic) updateData.topic = new Types.ObjectId(dto.topic);
     if (dto.exams) {
@@ -390,6 +392,7 @@ export class EquationBookService {
       subject: subject ?? '',
       topic: topic ?? '',
       exams,
+      sortOrder: obj.sortOrder ?? 0,
       isActive: obj.isActive,
       createdAt: obj.createdAt as Date,
       updatedAt: obj.updatedAt as Date,

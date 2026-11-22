@@ -166,6 +166,17 @@ describe('EquationBookService', () => {
       expect(result.data).toHaveLength(1);
       expect(result.pagination.total).toBe(1);
     });
+
+    it('lists higher sortOrder first', async () => {
+      const q = chain([equationDoc()]);
+      equationModel.find.mockReturnValue(q);
+      equationModel.countDocuments.mockReturnValue(chain(1));
+      await service.findAll(1, 10);
+      expect(q.sort).toHaveBeenCalledWith(
+        expect.objectContaining({ sortOrder: -1 }),
+      );
+      expect(Object.keys(q.sort.mock.calls[0][0])[0]).toBe('sortOrder');
+    });
   });
 
   describe('findOne', () => {

@@ -73,6 +73,12 @@ export class EquationResponseDto {
   @ApiProperty({ type: [EquationNamedRefDto] })
   exams: Array<EquationNamedRefDto | string>;
 
+  @ApiProperty({
+    description: 'Display priority; higher numbers are listed first.',
+    default: 0,
+  })
+  sortOrder: number;
+
   @ApiProperty()
   isActive: boolean;
 

@@ -2,7 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ThrottlerGuard } from '@nestjs/throttler';
-import { UnauthorizedException } from '@nestjs/common';
+import {
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -14,6 +17,7 @@ describe('AuthController', () => {
     signInWithGoogleIdToken: jest.fn(),
     refreshStudentSession: jest.fn(),
     logoutStudent: jest.fn(),
+    readBearerPayload: jest.fn(),
     createAdmin: jest.fn(),
     loginAdmin: jest.fn(),
   };
@@ -232,6 +236,69 @@ describe('AuthController', () => {
       expect((mockRes as { cookie: jest.Mock }).cookie).toHaveBeenCalled();
     });
 
+    it('keeps the refresh cookie when the session store is down', async () => {
+      process.env.NODE_ENV = 'test';
+      mockAuthService.refreshStudentSession.mockRejectedValue(
+        new ServiceUnavailableException(),
+      );
+      const req = {
+        headers: {
+          cookie: 'examflex_rt=still-valid',
+          origin: 'http://localhost:3001',
+        },
+        ip: '127.0.0.1',
+      } as never;
+
+      await expect(controller.refresh({}, req, mockRes)).rejects.toThrow(
+        ServiceUnavailableException,
+      );
+      expect(
+        (mockRes as { clearCookie: jest.Mock }).clearCookie,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('keeps the refresh cookie on an unexpected server error', async () => {
+      process.env.NODE_ENV = 'test';
+      mockAuthService.refreshStudentSession.mockRejectedValue(
+        new Error('mongo timeout'),
+      );
+      const req = {
+        headers: {
+          cookie: 'examflex_rt=still-valid',
+          origin: 'http://localhost:3001',
+        },
+        ip: '127.0.0.1',
+      } as never;
+
+      await expect(controller.refresh({}, req, mockRes)).rejects.toThrow(
+        'mongo timeout',
+      );
+      expect(
+        (mockRes as { clearCookie: jest.Mock }).clearCookie,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('clears the refresh cookie when the token is genuinely invalid', async () => {
+      process.env.NODE_ENV = 'test';
+      mockAuthService.refreshStudentSession.mockRejectedValue(
+        new UnauthorizedException('Invalid or expired refresh token'),
+      );
+      const req = {
+        headers: {
+          cookie: 'examflex_rt=stale',
+          origin: 'http://localhost:3001',
+        },
+        ip: '127.0.0.1',
+      } as never;
+
+      await expect(controller.refresh({}, req, mockRes)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(
+        (mockRes as { clearCookie: jest.Mock }).clearCookie,
+      ).toHaveBeenCalled();
+    });
+
     it('rejects cookie refresh from an evil origin', async () => {
       process.env.NODE_ENV = 'production';
       const req = {
@@ -257,12 +324,39 @@ describe('AuthController', () => {
         ip: '127.0.0.1',
       } as never;
 
-      const result = await controller.logout(undefined, req, mockRes);
+      mockAuthService.readBearerPayload.mockReturnValue(undefined);
+
+      const result = await controller.logout(req, mockRes);
 
       expect(result.message).toBe('Logged out');
       expect(authService.logoutStudent).toHaveBeenCalledWith(
         undefined,
         'still-valid-refresh',
+      );
+      expect(
+        (mockRes as { clearCookie: jest.Mock }).clearCookie,
+      ).toHaveBeenCalled();
+    });
+
+    it('revokes via the bearer payload and still clears the cookie', async () => {
+      const payload = { sub: 'u1', role: 'student', sid: 'sid-1' };
+      mockAuthService.readBearerPayload.mockReturnValue(payload);
+      const req = {
+        headers: {
+          origin: 'http://localhost:3001',
+          authorization: 'Bearer expired.but.signed',
+        },
+        ip: '127.0.0.1',
+      } as never;
+
+      await controller.logout(req, mockRes);
+
+      expect(mockAuthService.readBearerPayload).toHaveBeenCalledWith(
+        'Bearer expired.but.signed',
+      );
+      expect(authService.logoutStudent).toHaveBeenCalledWith(
+        payload,
+        undefined,
       );
       expect(
         (mockRes as { clearCookie: jest.Mock }).clearCookie,

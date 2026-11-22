@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   HttpException,
   Injectable,
+  ServiceUnavailableException,
   UnauthorizedException,
   Logger,
 } from '@nestjs/common';
@@ -23,7 +24,7 @@ import { AdminLoginDto } from './dto/admin-login.dto';
 import { UserRole } from '../common/enums/user-role.enum';
 import { StudentSessionService } from './session/student-session.service';
 import { AuthClient } from './session/session.types';
-import { WEB_ACCESS_TTL_SEC } from './session/session.constants';
+import { sessionPolicyFor } from './session/session.constants';
 import { parseCorsOrigins } from '../common/config/security.config';
 
 export interface JwtPayload {
@@ -48,6 +49,17 @@ export interface StudentSessionRequestMeta {
 export interface StudentAuthResult {
   response: AuthResponseDto;
   refreshCookie?: { token: string; maxAgeSec: number };
+}
+
+/**
+ * Errors that keep their own status: bad credentials stay 401, and a
+ * session-store outage stays 503. Anything else is reported as a generic 401.
+ */
+function isPassThroughAuthError(error: unknown): boolean {
+  return (
+    error instanceof UnauthorizedException ||
+    error instanceof ServiceUnavailableException
+  );
 }
 
 @Injectable()
@@ -78,14 +90,14 @@ export class AuthService {
       this.logger.log('Starting OTP verification and authentication process');
       const identity = await this.otpIdentity.verify(verifyOtpDto.accessToken);
       const { user, isNewUser } = await this.studentAccounts.resolve(identity);
-      return this.issueStudentSession(
+      return await this.issueStudentSession(
         user,
         isNewUser,
         this.resolveStudentClient(verifyOtpDto.client, meta.origin, 'web'),
         meta,
       );
     } catch (error) {
-      if (error instanceof UnauthorizedException) {
+      if (isPassThroughAuthError(error)) {
         throw error;
       }
 
@@ -114,7 +126,7 @@ export class AuthService {
       });
       const identity = await this.googleIdentity.verify(idToken);
       const { user, isNewUser } = await this.studentAccounts.resolve(identity);
-      return this.issueStudentSession(
+      return await this.issueStudentSession(
         user,
         isNewUser,
         this.resolveStudentClient(dto.client, meta.origin, 'web'),
@@ -142,7 +154,7 @@ export class AuthService {
     try {
       const identity = await this.googleIdentity.verifyMobile(dto.idToken);
       const { user, isNewUser } = await this.studentAccounts.resolve(identity);
-      return this.issueStudentSession(
+      return await this.issueStudentSession(
         user,
         isNewUser,
         this.resolveStudentClient(dto.client, meta.origin, 'mobile'),
@@ -204,7 +216,7 @@ export class AuthService {
 
   /**
    * Revoke the current student Redis session. Idempotent.
-   * Prefers access-token `sid`; falls back to refresh cookie when access expired.
+   * Revokes the access token's session and, when present, the refresh cookie's session.
    * Admin tokens and legacy JWTs without sid are a no-op for the JWT path.
    */
   async logoutStudent(
@@ -213,10 +225,31 @@ export class AuthService {
   ): Promise<void> {
     if (payload?.sid && payload.role !== UserRole.ADMIN) {
       await this.studentSessions.revoke(payload.sid, payload.sub);
-      return;
     }
+    // Also revoke the cookie's session: a stale Bearer from another session
+    // must not leave the live refresh credential valid. Already-gone sessions
+    // cost one GET and no-op.
     if (refreshToken) {
       await this.studentSessions.revokeByRefreshToken(refreshToken);
+    }
+  }
+
+  /**
+   * Read the session claims from a Bearer header for logout. The signature is
+   * verified but expiry is ignored, and no Redis/Mongo lookup happens, so an
+   * expired, revoked or store-outage session can still be signed out.
+   */
+  readBearerPayload(authorization?: string): JwtPayload | undefined {
+    const match = /^Bearer\s+(\S+)$/i.exec(authorization ?? '');
+    if (!match) {
+      return undefined;
+    }
+    try {
+      return this.jwtService.verify<JwtPayload>(match[1], {
+        ignoreExpiration: true,
+      });
+    } catch {
+      return undefined;
     }
   }
 
@@ -254,57 +287,34 @@ export class AuthService {
     const jwtPayload: JwtPayload = {
       sub: user.id,
       role: user.role,
+      sid: session.sid,
     };
     if (user.phoneNumber) {
       jwtPayload.phoneNumber = user.phoneNumber;
     }
 
-    try {
-      // Degraded Redis: issue legacy JWT without sid so the user is not locked out.
-      if (!session.persisted) {
-        const accessToken = this.jwtService.sign(jwtPayload, {
-          expiresIn: session.expiresInSec,
-        });
-        this.logger.warn(
-          `auth.session.degraded: legacy JWT issued for user ${user.id} (no sid)`,
-        );
-        return {
-          response: new AuthResponseDto(accessToken, user, isNewUser, {
-            expiresIn: session.expiresInSec,
-          }),
-        };
-      }
+    const accessExpiresIn = Math.min(
+      sessionPolicyFor(client).accessTtlSec,
+      session.expiresInSec,
+    );
+    const accessToken = this.jwtService.sign(jwtPayload, {
+      expiresIn: accessExpiresIn,
+    });
 
-      jwtPayload.sid = session.sid;
-      const accessExpiresIn =
-        client === 'web'
-          ? Math.min(WEB_ACCESS_TTL_SEC, session.expiresInSec)
-          : session.expiresInSec;
-      const accessToken = this.jwtService.sign(jwtPayload, {
+    this.logger.log(
+      `Student session created for user ${user.id} client=${session.client} sid=${session.sid} isNewUser=${isNewUser}`,
+    );
+
+    const isWeb = client === 'web';
+    return {
+      response: new AuthResponseDto(accessToken, user, isNewUser, {
+        refreshToken: isWeb ? undefined : session.refreshToken,
         expiresIn: accessExpiresIn,
-      });
-
-      this.logger.log(
-        `Student session created for user ${user.id} client=${session.client} sid=${session.sid} isNewUser=${isNewUser}`,
-      );
-
-      const isWeb = client === 'web';
-      return {
-        response: new AuthResponseDto(accessToken, user, isNewUser, {
-          refreshToken: isWeb ? undefined : session.refreshToken,
-          expiresIn: accessExpiresIn,
-        }),
-        refreshCookie: isWeb
-          ? { token: session.refreshToken, maxAgeSec: session.expiresInSec }
-          : undefined,
-      };
-    } catch (error) {
-      this.logger.error(
-        'Unexpected error during authentication:',
-        error?.message,
-      );
-      throw new UnauthorizedException('Authentication failed');
-    }
+      }),
+      refreshCookie: isWeb
+        ? { token: session.refreshToken, maxAgeSec: session.expiresInSec }
+        : undefined,
+    };
   }
 
   /**
@@ -394,60 +404,39 @@ export class AuthService {
         return user;
       }
 
-      // New student tokens carry sid and must map to a live Redis session
-      // (unless degraded mode / Redis blip — assertActive handles that).
-      if (payload.sid) {
-        const session = await this.studentSessions.assertActive(
-          payload.sid,
-          payload.sub,
-        );
-        if (!session) {
-          throw new UnauthorizedException('Session has ended');
-        }
+      // Student tokens must carry a sid that maps to a live Redis session.
+      // Tokens without one (pre-session era) are no longer accepted.
+      if (!payload.sid) {
+        throw new UnauthorizedException('Session has ended');
+      }
 
-        const touch = await this.studentSessions.touchActivity(
-          payload.sid,
-          payload.sub,
-        );
-        if (touch.shouldUpdateMongo) {
-          void this.usersService
-            .touchLastActiveAt(payload.sub)
-            .catch(error => {
-              this.logger.warn(
-                `Failed to touch lastActiveAt for ${payload.sub}: ${error?.message}`,
-              );
-            });
-        }
-      } else {
-        // Legacy student JWT (no sid): still track activity, no Redis bind.
-        void this.touchLegacyActivity(payload.sub);
+      const session = await this.studentSessions.assertActive(
+        payload.sid,
+        payload.sub,
+      );
+      if (!session) {
+        throw new UnauthorizedException('Session has ended');
+      }
+
+      const touch = await this.studentSessions.touchActivity(
+        payload.sid,
+        payload.sub,
+      );
+      if (touch.shouldUpdateMongo) {
+        void this.usersService.touchLastActiveAt(payload.sub).catch(error => {
+          this.logger.warn(
+            `Failed to touch lastActiveAt for ${payload.sub}: ${error?.message}`,
+          );
+        });
       }
 
       return user;
     } catch (error) {
-      if (error instanceof UnauthorizedException) {
+      if (isPassThroughAuthError(error)) {
         throw error;
       }
       this.logger.error('JWT payload validation failed:', error.message);
       throw new UnauthorizedException('Invalid token');
-    }
-  }
-
-  private async touchLegacyActivity(userId: string): Promise<void> {
-    // Reuse session service throttle via a synthetic sid key so we do not
-    // write Mongo on every legacy request either.
-    const touch = await this.studentSessions.touchActivity(
-      `legacy:${userId}`,
-      userId,
-    );
-    if (touch.shouldUpdateMongo) {
-      try {
-        await this.usersService.touchLastActiveAt(userId);
-      } catch (error) {
-        this.logger.warn(
-          `Failed to touch lastActiveAt for legacy user ${userId}: ${error?.message}`,
-        );
-      }
     }
   }
 }

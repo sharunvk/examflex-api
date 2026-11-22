@@ -10,6 +10,7 @@ import {
   Req,
   Res,
   UnauthorizedException,
+  HttpException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -24,7 +25,7 @@ import {
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
-import { AuthService, JwtPayload, StudentAuthResult } from './auth.service';
+import { AuthService, StudentAuthResult } from './auth.service';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { GoogleSignInDto } from './dto/google-sign-in.dto';
 import { GoogleMobileSignInDto } from './dto/google-mobile-sign-in.dto';
@@ -35,7 +36,6 @@ import { AdminLoginDto } from './dto/admin-login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from './guards/optional-jwt-auth.guard';
 import { GetUser } from './decorators/get-user.decorator';
-import { GetJwtPayload } from './decorators/get-jwt-payload.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import {
   assertCookieRequestOrigin,
@@ -226,23 +226,26 @@ Returns refreshToken in JSON (no HttpOnly cookie).
         data: result.response,
       };
     } catch (error) {
-      clearRefreshCookie(res);
+      // Only a definitive rejection of the credential (4xx) clears the
+      // cookie. A store or database failure (5xx, e.g. Redis 503) says nothing
+      // about the credential, so the user is not signed out by a blip.
+      if (error instanceof HttpException && error.getStatus() < 500) {
+        clearRefreshCookie(res);
+      }
       throw error;
     }
   }
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Log out the current student session',
     description:
-      'Revokes the Redis session bound to the access token (when present) and always clears the refresh cookie.',
+      'Revokes the Redis session bound to the access token (signature checked, expiry ignored) or to the refresh cookie, and always clears the refresh cookie. Does not depend on the session store being healthy.',
   })
   @ApiResponse({ status: 200, description: 'Logged out' })
   async logout(
-    @GetJwtPayload() payload: JwtPayload | undefined,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ message: string }> {
@@ -250,6 +253,9 @@ Returns refreshToken in JSON (no HttpOnly cookie).
     if (refreshToken) {
       assertCookieRequestOrigin(req);
     }
+    const payload = this.authService.readBearerPayload(
+      req.headers.authorization,
+    );
     await this.authService.logoutStudent(payload, refreshToken);
     clearRefreshCookie(res);
     return { message: 'Logged out' };

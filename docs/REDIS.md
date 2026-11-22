@@ -732,36 +732,40 @@ Full login / refresh / cookie / SPA design: [`STUDENT_SESSION_AUTH.md`](./STUDEN
 
 | Key | Purpose | TTL |
 | --- | --- | --- |
-| `{prefix}:session:{sid}` | Session JSON (`userId`, refresh hash, `client`, timestamps) | Remaining absolute session life (web 7d / mobile 90d) |
-| `{prefix}:session-refresh:{sha256}` | Refresh token → `sid` index | Same as session |
-| `{prefix}:user-sessions:{userId}` | SET of `sid`s for future logout-all | Same as session |
+| `{prefix}:session:{sid}` | Session JSON (`userId`, current refresh hash, last 10 rotated-out hashes, `client`, timestamps) | Idle window, slid on refresh, capped at the absolute lifetime (web 30d/90d, mobile 90d/365d) |
+| `{prefix}:user-sessions:{userId}` | SET of `sid`s for future logout-all | Absolute lifetime of the newest session |
+
+The refresh token embeds its `sid` (`<sid>.<secret>`), so there is no separate refresh-token index key. Refresh rotation and activity touches use a Lua compare-and-set (`EVAL`).
 
 ### Command budget (same rules as the import worker)
 
 Idle authenticated traffic must not poll Redis on a timer.
 
+Upstash meters a Lua script as the `EVAL` **plus every command inside it**, so the compare-and-set below costs 3 (successful) or 2 (lost race).
+
 | Event | Redis commands (typical) |
 | --- | --- |
-| Login / session create | Pipeline: `SET` session + `SET` refresh index + `SADD` + `EXPIRE` (~4) |
-| Access-token validate (cache hit) | **0** — in-process positive `sid` cache (~90s) |
+| Login / session create | Pipeline: `SET` session + `SADD` + `EXPIRE` (3) |
+| Access-token validate (cache hit) | **0** — in-process positive `sid` cache (90s) |
 | Access-token validate (cache miss) | **1** `GET` |
-| Activity touch (at most every ~12 min per sid) | **1** `GET` + **1** `SET` when due; otherwise 0 |
-| Refresh (web) | Rotate refresh; **remaining** absolute 7d TTL |
-| Refresh (mobile) | Rotate refresh; **slide** idle window +90d (Instagram-style) |
-| Logout | Pipeline `DEL` session + refresh index + `SREM` |
+| Activity touch (at most every ~12 min per sid) | `GET` + CAS `EVAL` (1 + 2 inner) = **4** when due; otherwise 0 |
+| Refresh (every ~15 min of use, and every page load on web) | `GET` + CAS `EVAL` = **4** |
+| Logout | `GET` + pipeline `DEL` + `SREM` (~3–4) |
+
+Rule of thumb: about **70 commands per hour of continuous use per session**, and about 4 per page load. At the free tier's 500K commands/month that is roughly 200 users studying an hour a day, before any other Redis use (health probes, accounting cache, import queue).
 
 ### Web refresh cookie vs mobile body
 
 | Client | Access JWT | Refresh delivery |
 | --- | --- | --- |
-| **Web** (`client=web`) | **15m** in SPA memory; JSON omits `refreshToken` | HttpOnly `ezprep_rt` cookie (`Path=/api/v1/auth`, `SameSite=Lax`, `Secure` in prod). Set `AUTH_COOKIE_DOMAIN=.ezprep.in` in production so `www` → `api` credentialed calls receive it. |
-| **Mobile** (`client=mobile`) | Long-lived until Phase 12 SecureStore | Opaque `refreshToken` in JSON body (unchanged) |
+| **Web** (`client=web`) | **15m** in SPA memory; JSON omits `refreshToken` | HttpOnly `examflex_rt` cookie (`Path=/api/v1/auth`, `SameSite=Lax`, `Secure` in prod). Set `AUTH_COOKIE_DOMAIN=.ezprep.in` in production so `www` → `api` credentialed calls receive it. |
+| **Mobile** (`client=mobile`) | **30m**, renewed silently from the refresh token | Opaque `refreshToken` in JSON body; store in Android Keystore-backed storage |
 | **Admin** | Unchanged | No Redis session / no refresh cookie |
 
 `POST /auth/refresh` prefers the cookie, else body. Cookie-based refresh/logout enforce Origin/Referer ∈ `CORS_ORIGINS`.
 
 Do **not** add background session sweepers, `SMEMBERS` on the request path, pub/sub, or BullMQ for auth.
 
-`AUTH_SESSION_STORE=degraded` (or Redis unavailable) skips Redis checks and may issue legacy JWTs without `sid` so students are not locked out. Revocation is weak until Redis recovers. Log line: `auth.session.degraded`.
+Student sessions fail closed: if Redis is unavailable, login/refresh/uncached auth return 503 (no legacy sid-less JWTs, no degraded mode). Failures log `auth.session: Redis unavailable during <op>`.
 
 Mongo remains the source of truth for the user row and throttled `lastActiveAt`. Redis is only the revoke/session glue.

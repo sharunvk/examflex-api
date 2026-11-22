@@ -1,5 +1,9 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import Redis from 'ioredis';
 import { REDIS_SETTINGS } from '../../redis/redis.constants';
@@ -8,13 +12,13 @@ import { RedisKeyBuilder } from '../../redis/redis-key.builder';
 import { errorMessage } from '../../redis/redis-log';
 import { RedisSettings } from '../../redis/redis.settings';
 import {
-  AUTH_SESSION_STORE_ENV,
-  MOBILE_ACCESS_TTL_SEC,
-  MOBILE_SESSION_TTL_SEC,
+  MAX_PREVIOUS_REFRESH_HASHES,
+  MOBILE_SESSION_ABSOLUTE_TTL_SEC,
+  WEB_SESSION_ABSOLUTE_TTL_SEC,
+  REFRESH_GRACE_MS,
   SESSION_ACTIVITY_TOUCH_MS,
   SESSION_SID_CACHE_TTL_MS,
-  WEB_ACCESS_TTL_SEC,
-  WEB_SESSION_TTL_SEC,
+  sessionPolicyFor,
 } from './session.constants';
 import {
   AuthClient,
@@ -47,72 +51,77 @@ export interface RefreshSessionResult {
 }
 
 /**
+ * Atomic compare-and-set: write the new session JSON only if the stored value
+ * is still exactly what the caller read. Stops concurrent refreshes and
+ * activity touches from overwriting each other's token rotation.
+ */
+const CAS_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+  return 1
+end
+return 0
+`;
+
+const MAX_CAS_ATTEMPTS = 3;
+
+/** Longest any session can live; a shorter login must not shrink the user's session set. */
+const USER_SESSIONS_TTL_SEC = Math.max(
+  WEB_SESSION_ABSOLUTE_TTL_SEC,
+  MOBILE_SESSION_ABSOLUTE_TTL_SEC,
+);
+
+/** Bounds for the in-process maps (entries are otherwise only removed on lookup). */
+const MAX_TRACKED_ENTRIES = 5_000;
+
+/** Refresh token format: `<sid>.<secret>`; only the secret's hash is stored. */
+const REFRESH_TOKEN_PATTERN = /^([0-9a-f-]{36})\.([A-Za-z0-9_-]{32,})$/;
+
+type RotateOutcome = RefreshSessionResult | null | 'retry';
+
+/**
  * Redis-backed student sessions with an in-process positive sid cache so
  * authenticated traffic does not burn Upstash commands on every request.
+ *
+ * Fails closed: when Redis cannot confirm or write a session, session-bearing
+ * operations throw 503 instead of issuing or accepting unverifiable tokens.
  * See docs/REDIS.md § Student sessions.
  */
 @Injectable()
 export class StudentSessionService {
   private readonly logger = new Logger(StudentSessionService.name);
-  private clientPromise: Promise<Redis | null> | null = null;
+  private clientPromise: Promise<Redis> | null = null;
   private readonly sidCache = new Map<string, SidCacheEntry>();
   private readonly lastTouchAt = new Map<string, number>();
-  private degradedForced: boolean;
 
   constructor(
     @Inject(REDIS_SETTINGS) private readonly settings: RedisSettings,
     private readonly registry: RedisConnectionRegistry,
     private readonly keys: RedisKeyBuilder,
-    config: ConfigService,
-  ) {
-    this.degradedForced =
-      (config.get<string>(AUTH_SESSION_STORE_ENV) || '').toLowerCase() ===
-      'degraded';
-    if (this.degradedForced) {
-      this.logger.warn(
-        'auth.session.degraded: AUTH_SESSION_STORE=degraded — Redis session checks are skipped',
-      );
-    }
-  }
+  ) {}
 
+  /** Idle window for a new session of this client type. */
   ttlSecFor(client: AuthClient): number {
-    return client === 'mobile' ? MOBILE_SESSION_TTL_SEC : WEB_SESSION_TTL_SEC;
-  }
-
-  isDegraded(): boolean {
-    return this.degradedForced || !this.settings.enabled;
+    return sessionPolicyFor(client).idleTtlSec;
   }
 
   /**
-   * Create a session in Redis. On Redis failure returns persisted:false so
-   * the caller can issue a legacy JWT without sid (degraded login).
+   * Create a session in Redis. Throws 503 when the store is unavailable;
+   * a login is never completed without a revocable session.
    */
   async create(input: CreateSessionInput): Promise<CreatedStudentSession> {
     const client = input.client === 'mobile' ? 'mobile' : 'web';
-    const expiresInSec = this.ttlSecFor(client);
+    const policy = sessionPolicyFor(client);
+    const expiresInSec = policy.idleTtlSec;
     const now = Date.now();
     const expiresAt = new Date(now + expiresInSec * 1000);
     const sid = randomUUID();
-    const refreshToken = randomBytes(48).toString('base64url');
-    const refreshTokenHash = this.hashRefresh(refreshToken);
-
-    if (this.degradedForced) {
-      this.logger.warn(
-        `auth.session.degraded: issuing ephemeral session metadata for user ${input.userId}`,
-      );
-      return {
-        sid,
-        refreshToken,
-        expiresAt,
-        expiresInSec,
-        client,
-        persisted: false,
-      };
-    }
+    const refreshToken = this.newRefreshToken(sid);
 
     const record: StudentSessionRecord = {
       userId: input.userId,
-      refreshTokenHash,
+      refreshTokenHash: this.hashRefresh(refreshToken),
+      previousRefreshes: [],
       createdAt: new Date(now).toISOString(),
       expiresAt: expiresAt.toISOString(),
       lastSeenAt: new Date(now).toISOString(),
@@ -122,68 +131,35 @@ export class StudentSessionService {
     };
 
     try {
-      const redis = await this.redisClient();
-      if (!redis) {
-        this.logger.warn(
-          `auth.session.degraded: Redis unavailable while creating session for user ${input.userId}`,
-        );
-        return {
-          sid,
-          refreshToken,
-          expiresAt,
-          expiresInSec,
-          client,
-          persisted: false,
-        };
-      }
-
-      const sessionKey = this.sessionKey(sid);
+      const redis = await this.requireRedis();
       const userKey = this.userSessionsKey(input.userId);
       const pipeline = redis.pipeline();
-      pipeline.set(sessionKey, JSON.stringify(record), 'EX', expiresInSec);
       pipeline.set(
-        this.refreshIndexKey(refreshTokenHash),
-        sid,
+        this.sessionKey(sid),
+        JSON.stringify(record),
         'EX',
         expiresInSec,
       );
       pipeline.sadd(userKey, sid);
-      pipeline.expire(userKey, expiresInSec);
-      await pipeline.exec();
-
-      this.rememberSid(sid, {
-        userId: input.userId,
-        expiresAtMs: expiresAt.getTime(),
-        client,
-        cachedAtMs: now,
-      });
-
-      return {
-        sid,
-        refreshToken,
-        expiresAt,
-        expiresInSec,
-        client,
-        persisted: true,
-      };
+      pipeline.expire(userKey, USER_SESSIONS_TTL_SEC);
+      await this.execPipeline(pipeline);
     } catch (error) {
-      this.logger.warn(
-        `auth.session.degraded: Redis write failed for user ${input.userId}: ${errorMessage(error)}`,
-      );
-      return {
-        sid,
-        refreshToken,
-        expiresAt,
-        expiresInSec,
-        client,
-        persisted: false,
-      };
+      throw this.asUnavailable('create', error);
     }
+
+    this.rememberSid(sid, {
+      userId: input.userId,
+      expiresAtMs: expiresAt.getTime(),
+      client,
+      cachedAtMs: now,
+    });
+
+    return { sid, refreshToken, expiresAt, expiresInSec, client };
   }
 
   /**
    * Confirm a live session for a JWT sid. Returns null if revoked/expired.
-   * In degraded mode, accepts any non-empty sid without Redis.
+   * Throws 503 when Redis cannot answer (cache hits still succeed).
    */
   async assertActive(
     sid: string,
@@ -191,16 +167,6 @@ export class StudentSessionService {
   ): Promise<ResolvedStudentSession | null> {
     if (!sid) {
       return null;
-    }
-
-    if (this.degradedForced) {
-      return {
-        sid,
-        userId,
-        expiresAt: new Date(Date.now() + WEB_SESSION_TTL_SEC * 1000),
-        client: 'web',
-        fromCache: true,
-      };
     }
 
     const cached = this.sidCache.get(sid);
@@ -220,225 +186,143 @@ export class StudentSessionService {
       };
     }
 
+    let raw: string | null;
     try {
-      const redis = await this.redisClient();
-      if (!redis) {
-        this.logger.warn(
-          `auth.session.degraded: Redis unavailable while asserting sid ${sid}`,
-        );
-        return {
-          sid,
-          userId,
-          expiresAt: new Date(now + WEB_SESSION_TTL_SEC * 1000),
-          client: 'web',
-          fromCache: true,
-        };
-      }
-
-      const raw = await redis.get(this.sessionKey(sid));
-      if (!raw) {
-        this.sidCache.delete(sid);
-        return null;
-      }
-
-      const record = this.parseRecord(raw);
-      if (!record || record.userId !== userId) {
-        this.sidCache.delete(sid);
-        return null;
-      }
-
-      const expiresAtMs = Date.parse(record.expiresAt);
-      if (!Number.isFinite(expiresAtMs) || expiresAtMs <= now) {
-        this.sidCache.delete(sid);
-        return null;
-      }
-
-      this.rememberSid(sid, {
-        userId: record.userId,
-        expiresAtMs,
-        client: record.client,
-        cachedAtMs: now,
-      });
-
-      return {
-        sid,
-        userId: record.userId,
-        expiresAt: new Date(expiresAtMs),
-        client: record.client,
-        fromCache: false,
-      };
+      const redis = await this.requireRedis();
+      raw = await redis.get(this.sessionKey(sid));
     } catch (error) {
-      this.logger.warn(
-        `auth.session.degraded: Redis GET failed for sid ${sid}: ${errorMessage(error)}`,
-      );
-      return {
-        sid,
-        userId,
-        expiresAt: new Date(now + WEB_SESSION_TTL_SEC * 1000),
-        client: 'web',
-        fromCache: true,
-      };
+      throw this.asUnavailable('assertActive', error);
     }
+
+    if (!raw) {
+      this.sidCache.delete(sid);
+      return null;
+    }
+
+    const record = this.parseRecord(raw);
+    if (!record || record.userId !== userId) {
+      this.sidCache.delete(sid);
+      return null;
+    }
+
+    const expiresAtMs = Date.parse(record.expiresAt);
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= now) {
+      this.sidCache.delete(sid);
+      return null;
+    }
+
+    this.rememberSid(sid, {
+      userId: record.userId,
+      expiresAtMs,
+      client: record.client,
+      cachedAtMs: now,
+    });
+
+    return {
+      sid,
+      userId: record.userId,
+      expiresAt: new Date(expiresAtMs),
+      client: record.client,
+      fromCache: false,
+    };
   }
 
   /**
-   * Rotate refresh token.
-   * - web: remaining absolute TTL from original login (no slide past 7d)
-   * - mobile: slide idle window forward by MOBILE_SESSION_TTL_SEC (Instagram-style)
+   * Rotate the refresh token and slide the idle window (never past the
+   * absolute cap measured from login).
+   *
+   * - A token that matches the live one rotates normally.
+   * - The token rotated out most recently stays valid for REFRESH_GRACE_MS, so
+   *   a lost response or two racing refreshes do not sign the user out.
+   * - An older rotated-out token is treated as theft: the session is revoked.
+   *
+   * Returns null for an invalid/expired token; throws 503 when Redis cannot
+   * answer so callers never mistake an outage for a bad credential.
    */
   async refresh(refreshToken: string): Promise<RefreshSessionResult | null> {
-    if (!refreshToken || this.degradedForced) {
+    const sid = this.sidFromRefreshToken(refreshToken);
+    if (!sid) {
       return null;
     }
 
     try {
-      const redis = await this.redisClient();
-      if (!redis) {
-        return null;
+      const redis = await this.requireRedis();
+      for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+        const outcome = await this.tryRotate(redis, sid, refreshToken);
+        if (outcome !== 'retry') {
+          return outcome;
+        }
       }
-
-      const hash = this.hashRefresh(refreshToken);
-      const sid = await redis.get(this.refreshIndexKey(hash));
-      if (!sid) {
-        return null;
-      }
-
-      const sessionKey = this.sessionKey(sid);
-      const raw = await redis.get(sessionKey);
-      if (!raw) {
-        await redis.del(this.refreshIndexKey(hash));
-        return null;
-      }
-
-      const record = this.parseRecord(raw);
-      if (!record) {
-        return null;
-      }
-
-      // Presented refresh does not match the live session → possible theft after
-      // rotation. Kill the session rather than issuing new tokens.
-      if (record.refreshTokenHash !== hash) {
-        this.logger.warn(
-          `auth.session: refresh reuse/mismatch for sid ${sid}; revoking`,
-        );
-        await this.revoke(sid, record.userId);
-        return null;
-      }
-
-      const now = Date.now();
-      const expiresAtMs = Date.parse(record.expiresAt);
-      if (!Number.isFinite(expiresAtMs) || expiresAtMs <= now) {
-        await this.revoke(sid, record.userId);
-        return null;
-      }
-
-      const isMobile = record.client === 'mobile';
-      const nextExpiresAtMs = isMobile
-        ? now + MOBILE_SESSION_TTL_SEC * 1000
-        : expiresAtMs;
-      const ttlSec = Math.max(1, Math.floor((nextExpiresAtMs - now) / 1000));
-      // Access JWT lifetime: web short-lived; mobile long until Phase 12.
-      const accessExpiresInSec = isMobile
-        ? Math.min(MOBILE_ACCESS_TTL_SEC, ttlSec)
-        : Math.min(WEB_ACCESS_TTL_SEC, ttlSec);
-
-      const nextRefresh = randomBytes(48).toString('base64url');
-      const nextHash = this.hashRefresh(nextRefresh);
-      const updated: StudentSessionRecord = {
-        ...record,
-        refreshTokenHash: nextHash,
-        expiresAt: new Date(nextExpiresAtMs).toISOString(),
-        lastSeenAt: new Date(now).toISOString(),
-      };
-
-      const pipeline = redis.pipeline();
-      pipeline.set(sessionKey, JSON.stringify(updated), 'EX', ttlSec);
-      pipeline.del(this.refreshIndexKey(hash));
-      pipeline.set(this.refreshIndexKey(nextHash), sid, 'EX', ttlSec);
-      pipeline.expire(this.userSessionsKey(record.userId), ttlSec);
-      await pipeline.exec();
-
-      this.rememberSid(sid, {
-        userId: record.userId,
-        expiresAtMs: nextExpiresAtMs,
-        client: record.client,
-        cachedAtMs: now,
-      });
-
-      return {
-        sid,
-        refreshToken: nextRefresh,
-        expiresAt: new Date(nextExpiresAtMs),
-        expiresInSec: accessExpiresInSec,
-        client: record.client,
-        userId: record.userId,
-      };
+      throw new Error('refresh lost the rotation race repeatedly');
     } catch (error) {
-      this.logger.warn(`auth.session: refresh failed: ${errorMessage(error)}`);
-      return null;
+      throw this.asUnavailable('refresh', error);
     }
   }
 
   /**
-   * Delete one session. Idempotent. Best-effort when Redis is down.
+   * Delete one session. Idempotent. Best-effort when Redis is down: used by
+   * logout, which must still clear client credentials.
    */
   async revoke(sid: string, userId?: string): Promise<void> {
-    this.sidCache.delete(sid);
-    if (!sid || this.degradedForced) {
-      return;
-    }
-
     try {
-      const redis = await this.redisClient();
-      if (!redis) {
-        return;
-      }
-
-      const sessionKey = this.sessionKey(sid);
-      const raw = await redis.get(sessionKey);
-      const record = raw ? this.parseRecord(raw) : null;
-      const owner = userId || record?.userId;
-
-      const pipeline = redis.pipeline();
-      pipeline.del(sessionKey);
-      if (record?.refreshTokenHash) {
-        pipeline.del(this.refreshIndexKey(record.refreshTokenHash));
-      }
-      if (owner) {
-        pipeline.srem(this.userSessionsKey(owner), sid);
-      }
-      await pipeline.exec();
+      await this.deleteSession(sid, userId);
     } catch (error) {
-      this.logger.warn(
+      // The session stays in Redis until its TTL, so make the failure loud.
+      this.logger.error(
         `auth.session: revoke failed for sid ${sid}: ${errorMessage(error)}`,
       );
     }
   }
 
+  /** Delete one session and propagate Redis failures (strict). */
+  private async deleteSession(sid: string, userId?: string): Promise<void> {
+    this.sidCache.delete(sid);
+    if (!sid) {
+      return;
+    }
+
+    const redis = await this.requireRedis();
+    const sessionKey = this.sessionKey(sid);
+    const raw = await redis.get(sessionKey);
+    const record = raw ? this.parseRecord(raw) : null;
+    const owner = userId || record?.userId;
+
+    const pipeline = redis.pipeline();
+    pipeline.del(sessionKey);
+    if (owner) {
+      pipeline.srem(this.userSessionsKey(owner), sid);
+    }
+    await this.execPipeline(pipeline);
+  }
+
   /**
-   * Resolve refresh token → sid and revoke. Used when logout has the HttpOnly
-   * cookie but the short-lived access JWT is already expired.
+   * Revoke the session a refresh token belongs to. Used when logout has the
+   * HttpOnly cookie but the short-lived access JWT is already expired. The
+   * secret must match (current or rotated-out) so a forged `<sid>.<junk>`
+   * cannot sign another user out.
    */
   async revokeByRefreshToken(refreshToken: string): Promise<void> {
-    if (!refreshToken || this.degradedForced) {
+    const sid = this.sidFromRefreshToken(refreshToken);
+    if (!sid) {
       return;
     }
 
     try {
-      const redis = await this.redisClient();
-      if (!redis) {
+      const redis = await this.requireRedis();
+      const raw = await redis.get(this.sessionKey(sid));
+      const record = raw ? this.parseRecord(raw) : null;
+      if (!record) {
         return;
       }
-
       const hash = this.hashRefresh(refreshToken);
-      const sid = await redis.get(this.refreshIndexKey(hash));
-      if (!sid) {
-        await redis.del(this.refreshIndexKey(hash));
-        return;
+      const known =
+        record.refreshTokenHash === hash ||
+        (record.previousRefreshes ?? []).some(entry => entry.hash === hash);
+      if (known) {
+        await this.revoke(sid, record.userId);
       }
-      await this.revoke(sid);
     } catch (error) {
-      this.logger.warn(
+      this.logger.error(
         `auth.session: revokeByRefreshToken failed: ${errorMessage(error)}`,
       );
     }
@@ -462,30 +346,19 @@ export class StudentSessionService {
       return { shouldUpdateMongo: false };
     }
 
+    this.pruneTouches(now);
     this.lastTouchAt.set(touchKey, now);
     const shouldUpdateMongo = now - lastUser >= SESSION_ACTIVITY_TOUCH_MS;
     if (shouldUpdateMongo) {
       this.lastTouchAt.set(userKey, now);
     }
 
-    if (this.degradedForced || sid.startsWith('legacy:')) {
-      return { shouldUpdateMongo };
-    }
-
     try {
-      const redis = await this.redisClient();
-      if (!redis) {
-        return { shouldUpdateMongo };
-      }
-
+      const redis = await this.requireRedis();
       const sessionKey = this.sessionKey(sid);
       const raw = await redis.get(sessionKey);
-      if (!raw) {
-        return { shouldUpdateMongo };
-      }
-
-      const record = this.parseRecord(raw);
-      if (!record) {
+      const record = raw ? this.parseRecord(raw) : null;
+      if (!raw || !record) {
         return { shouldUpdateMongo };
       }
 
@@ -495,7 +368,15 @@ export class StudentSessionService {
         ...record,
         lastSeenAt: new Date(now).toISOString(),
       };
-      await redis.set(sessionKey, JSON.stringify(updated), 'EX', remainingSec);
+      // CAS: if a refresh rotated the token in the meantime, skip this touch
+      // rather than writing the stale record back over the new token hash.
+      await this.compareAndSet(
+        redis,
+        sessionKey,
+        raw,
+        JSON.stringify(updated),
+        remainingSec,
+      );
     } catch (error) {
       this.logger.warn(
         `auth.session: touchActivity failed for sid ${sid}: ${errorMessage(error)}`,
@@ -505,8 +386,153 @@ export class StudentSessionService {
     return { shouldUpdateMongo };
   }
 
+  private async tryRotate(
+    redis: Redis,
+    sid: string,
+    refreshToken: string,
+  ): Promise<RotateOutcome> {
+    const sessionKey = this.sessionKey(sid);
+    const raw = await redis.get(sessionKey);
+    const record = raw ? this.parseRecord(raw) : null;
+    if (!raw || !record) {
+      return null;
+    }
+
+    const now = Date.now();
+    const hash = this.hashRefresh(refreshToken);
+
+    if (record.refreshTokenHash !== hash) {
+      const previous = (record.previousRefreshes ?? []).find(
+        entry => entry.hash === hash,
+      );
+      if (!previous) {
+        return null;
+      }
+      if (now - previous.rotatedAt > REFRESH_GRACE_MS) {
+        // A token rotated out earlier is being replayed: assume theft.
+        this.logger.warn(
+          `auth.session: refresh reuse for sid ${sid}; revoking session`,
+        );
+        await this.deleteSession(sid, record.userId);
+        return null;
+      }
+    }
+
+    const expiresAtMs = Date.parse(record.expiresAt);
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= now) {
+      await this.deleteSession(sid, record.userId);
+      return null;
+    }
+
+    const policy = sessionPolicyFor(record.client);
+    const createdAtMs = Date.parse(record.createdAt);
+    const absoluteEndMs = Number.isFinite(createdAtMs)
+      ? createdAtMs + policy.absoluteTtlSec * 1000
+      : now + policy.idleTtlSec * 1000;
+    const nextExpiresAtMs = Math.min(
+      now + policy.idleTtlSec * 1000,
+      absoluteEndMs,
+    );
+    if (nextExpiresAtMs <= now) {
+      await this.deleteSession(sid, record.userId);
+      return null;
+    }
+
+    const ttlSec = Math.max(1, Math.floor((nextExpiresAtMs - now) / 1000));
+    const nextRefresh = this.newRefreshToken(sid);
+    const updated: StudentSessionRecord = {
+      ...record,
+      refreshTokenHash: this.hashRefresh(nextRefresh),
+      previousRefreshes: [
+        { hash: record.refreshTokenHash, rotatedAt: now },
+        ...(record.previousRefreshes ?? []),
+      ].slice(0, MAX_PREVIOUS_REFRESH_HASHES),
+      expiresAt: new Date(nextExpiresAtMs).toISOString(),
+      lastSeenAt: new Date(now).toISOString(),
+    };
+
+    const written = await this.compareAndSet(
+      redis,
+      sessionKey,
+      raw,
+      JSON.stringify(updated),
+      ttlSec,
+    );
+    if (!written) {
+      return 'retry';
+    }
+
+    this.rememberSid(sid, {
+      userId: record.userId,
+      expiresAtMs: nextExpiresAtMs,
+      client: record.client,
+      cachedAtMs: now,
+    });
+
+    return {
+      sid,
+      refreshToken: nextRefresh,
+      expiresAt: new Date(nextExpiresAtMs),
+      expiresInSec: Math.min(policy.accessTtlSec, ttlSec),
+      client: record.client,
+      userId: record.userId,
+    };
+  }
+
+  private async compareAndSet(
+    redis: Redis,
+    key: string,
+    expectedRaw: string,
+    nextRaw: string,
+    ttlSec: number,
+  ): Promise<boolean> {
+    const result = await redis.eval(
+      CAS_SCRIPT,
+      1,
+      key,
+      expectedRaw,
+      nextRaw,
+      String(ttlSec),
+    );
+    return Number(result) === 1;
+  }
+
+  private newRefreshToken(sid: string): string {
+    return `${sid}.${randomBytes(48).toString('base64url')}`;
+  }
+
+  private sidFromRefreshToken(token: string): string | null {
+    if (!token) {
+      return null;
+    }
+    const match = REFRESH_TOKEN_PATTERN.exec(token);
+    return match ? match[1] : null;
+  }
+
   private rememberSid(sid: string, entry: SidCacheEntry): void {
     this.sidCache.set(sid, entry);
+    if (this.sidCache.size > MAX_TRACKED_ENTRIES) {
+      const now = Date.now();
+      for (const [key, value] of this.sidCache) {
+        if (
+          value.expiresAtMs <= now ||
+          now - value.cachedAtMs >= SESSION_SID_CACHE_TTL_MS
+        ) {
+          this.sidCache.delete(key);
+        }
+      }
+    }
+  }
+
+  private pruneTouches(now: number): void {
+    if (this.lastTouchAt.size <= MAX_TRACKED_ENTRIES) {
+      return;
+    }
+    for (const [key, at] of this.lastTouchAt) {
+      if (now - at >= SESSION_ACTIVITY_TOUCH_MS) {
+        this.lastTouchAt.delete(key);
+      }
+    }
   }
 
   private hashRefresh(token: string): string {
@@ -519,10 +545,6 @@ export class StudentSessionService {
 
   private userSessionsKey(userId: string): string {
     return this.keys.key('user-sessions', userId);
-  }
-
-  private refreshIndexKey(hash: string): string {
-    return this.keys.key('session-refresh', hash);
   }
 
   private parseRecord(raw: string): StudentSessionRecord | null {
@@ -542,9 +564,10 @@ export class StudentSessionService {
     }
   }
 
-  private redisClient(): Promise<Redis | null> {
+  /** Connected client, or throws; callers translate to 503. */
+  private async requireRedis(): Promise<Redis> {
     if (!this.settings.enabled) {
-      return Promise.resolve(null);
+      throw new Error('Redis is not configured');
     }
     if (!this.clientPromise) {
       this.clientPromise = this.connect();
@@ -552,19 +575,39 @@ export class StudentSessionService {
     return this.clientPromise;
   }
 
-  private async connect(): Promise<Redis | null> {
+  private async connect(): Promise<Redis> {
+    const client = this.registry.create('command');
     try {
-      const client = this.registry.create('command');
       if (client.status === 'wait') {
         await client.connect();
       }
       return client;
     } catch (error) {
-      this.logger.warn(
-        `auth.session: Redis connect failed: ${errorMessage(error)}`,
-      );
-      this.clientPromise = Promise.resolve(null);
-      return null;
+      // Do not cache the failure: the next request retries on a fresh client.
+      this.clientPromise = null;
+      client.disconnect();
+      throw error;
     }
+  }
+
+  /** ioredis pipelines resolve per-command errors instead of rejecting. */
+  private async execPipeline(pipeline: ReturnType<Redis['pipeline']>) {
+    const results = await pipeline.exec();
+    const failed = results?.find(([err]) => err);
+    if (failed?.[0]) {
+      throw failed[0];
+    }
+  }
+
+  private asUnavailable(op: string, error: unknown): Error {
+    if (error instanceof ServiceUnavailableException) {
+      return error;
+    }
+    this.logger.error(
+      `auth.session: Redis unavailable during ${op}: ${errorMessage(error)}`,
+    );
+    return new ServiceUnavailableException(
+      'Sign-in is temporarily unavailable. Please try again shortly.',
+    );
   }
 }

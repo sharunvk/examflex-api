@@ -51,10 +51,10 @@ describe('buildTodayPage', () => {
     expect(page.mode).toBe('empty');
     expect(page.overview.eyebrow).toMatch(/WELCOME/i);
     expect(page.nextStep.showPath).toBe(true);
-    expect(page.nextStep.ctaLabel).toMatch(/first mock/i);
-    expect(page.nextStep.body).toMatch(/Mistake Book for calm review/i);
-    expect(page.nextStep.body).not.toMatch(/Equation Book/i);
-    expect(page.nextStep.ctaHref).toBe(`/mocks/exam/${EXAM_ID}/full-mocks`);
+    expect(page.nextStep.title).toBe('Your first step is a quick revision.');
+    expect(page.nextStep.body).toBe("Let's flex some equations.");
+    expect(page.nextStep.ctaLabel).toMatch(/Open Equation Book/i);
+    expect(page.nextStep.ctaHref).toBe('/equation-book');
     expect(page.nextMock.ctaHref).toBe(`/mocks/exam/${EXAM_ID}/full-mocks`);
     expect(page.sessionPlan.steps.map(s => s.state)).toEqual([
       'active',

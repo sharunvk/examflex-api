@@ -91,10 +91,10 @@ function buildNextStep(
   if (mode === 'empty') {
     return {
       eyebrow: 'START HERE',
-      title: 'Your first step is one mock.',
-      body: 'Take a full-syllabus mock. Misses land in your Mistake Book for calm review, and you get a score you can build on.',
-      ctaLabel: 'Take your first mock  →',
-      ctaHref: `/mocks/exam/${examId}/full-mocks`,
+      title: 'Your first step is a quick revision.',
+      body: "Let's flex some equations.",
+      ctaLabel: 'Open Equation Book  →',
+      ctaHref: '/equation-book',
       aside: 'Small start. Real progress.',
       showPath: true,
     };

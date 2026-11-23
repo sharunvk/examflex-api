@@ -7,6 +7,7 @@ import {
 } from '../../mock-test-attempts/schemas/question.schema';
 import { ImportQuestion } from '../types/import-question';
 import { createdByFields } from '../../common/types/to-actor-object-id';
+import { QuestionCitationsService } from '../../citations/question-citations.service';
 
 @Injectable()
 export class QuestionPersistenceService {
@@ -15,6 +16,7 @@ export class QuestionPersistenceService {
   constructor(
     @InjectModel(Question.name)
     private readonly questionModel: Model<QuestionDocument>,
+    private readonly citations: QuestionCitationsService,
   ) {}
 
   async saveOne(
@@ -29,6 +31,8 @@ export class QuestionPersistenceService {
     try {
       const created = await this.questionModel.create(payload);
       this.logger.log(`[persist] Saved question ${created._id.toString()}`);
+      // Background lookup: never blocks or fails the import.
+      void this.citations.autoAttach(created._id.toString());
       return created;
     } catch (error) {
       const message =

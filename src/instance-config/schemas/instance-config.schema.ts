@@ -182,6 +182,38 @@ export class InstanceRedisConfig {
 export const InstanceRedisConfigSchema =
   SchemaFactory.createForClass(InstanceRedisConfig);
 
+@Schema({ _id: false })
+export class InstanceVectorSubject {
+  @Prop({ required: true, trim: true, lowercase: true, maxlength: 60 })
+  key: string;
+
+  @Prop({ required: true, trim: true, maxlength: 120 })
+  label: string;
+
+  /** Value of the `subjectId` property on chunks in the vector collection. */
+  @Prop({ required: true, trim: true, maxlength: 120 })
+  vectorSubjectId: string;
+}
+
+export const InstanceVectorSubjectSchema = SchemaFactory.createForClass(
+  InstanceVectorSubject,
+);
+
+/** NCERT citation search. Credentials stay in the environment. */
+@Schema({ _id: false })
+export class InstanceVectorSearchConfig {
+  /** Weaviate collection name, e.g. Ncert. (`collection` is reserved by Mongoose.) */
+  @Prop({ trim: true, maxlength: 120 })
+  collectionName?: string;
+
+  @Prop({ type: [InstanceVectorSubjectSchema], default: undefined })
+  subjects?: InstanceVectorSubject[];
+}
+
+export const InstanceVectorSearchConfigSchema = SchemaFactory.createForClass(
+  InstanceVectorSearchConfig,
+);
+
 @Schema({
   timestamps: true,
   versionKey: false,
@@ -218,6 +250,10 @@ export class InstanceConfig {
   /** Optional Redis tunables. REDIS_URL and per-process queue role stay in the environment. */
   @Prop({ type: InstanceRedisConfigSchema })
   redis?: InstanceRedisConfig;
+
+  /** Optional. Absent fields fall back to DEFAULT_VECTOR_SEARCH. Read live. */
+  @Prop({ type: InstanceVectorSearchConfigSchema })
+  vectorSearch?: InstanceVectorSearchConfig;
 
   createdAt?: Date;
   updatedAt?: Date;

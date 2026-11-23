@@ -25,6 +25,8 @@ import {
   updatedByFields,
 } from '../common/types/to-actor-object-id';
 import { questionTagIds, questionTagNames } from './question-tag-names';
+import { QuestionCitationsService } from '../citations/question-citations.service';
+import { toChapterName } from '../citations/chapter-name';
 
 const VISIBLE_QUESTION: FilterQuery<Question> = {
   isDeleted: { $ne: true },
@@ -40,6 +42,7 @@ export class QuestionsService {
     @InjectModel(Question.name)
     private readonly questionModel: Model<QuestionDocument>,
     private readonly awsConfig: AwsConfigService,
+    private readonly citations: QuestionCitationsService,
   ) {}
 
   async create(
@@ -54,6 +57,9 @@ export class QuestionsService {
       isDeleted: false,
       ...createdByFields(actorUserId),
     });
+
+    // Background lookup: never blocks or fails the create.
+    void this.citations.autoAttach(question.id);
 
     return this.findOne(question.id);
   }
@@ -159,6 +165,16 @@ export class QuestionsService {
     };
     const clearTags = dto.tagIds !== undefined && !('tags' in document);
 
+    // Only a real subject change re-runs automatic citations.
+    const previous =
+      dto.subject !== undefined
+        ? await this.questionModel
+            .findOne({ _id: id, ...VISIBLE_QUESTION })
+            .select('subject')
+            .lean<{ subject?: Types.ObjectId }>()
+            .exec()
+        : null;
+
     const question = await this.questionModel
       .findOneAndUpdate(
         { _id: id, ...VISIBLE_QUESTION },
@@ -178,7 +194,27 @@ export class QuestionsService {
       throw new NotFoundException(`Question with ID "${id}" not found`);
     }
 
+    if (
+      previous &&
+      String(previous.subject ?? '') !== this.refId(question.subject)
+    ) {
+      // autoAttach leaves admin-picked citations alone.
+      void this.citations.autoAttach(question.id);
+    }
+
     return this.toResponseDto(question);
+  }
+
+  /** Id of a ref that may be populated. */
+  private refId(value: unknown): string {
+    if (!value) {
+      return '';
+    }
+    const row = value as { _id?: { toString(): string }; id?: unknown };
+    if (row._id) {
+      return row._id.toString();
+    }
+    return typeof row.id === 'string' ? row.id : String(value);
   }
 
   async remove(id: string, actorUserId?: string): Promise<{ message: string }> {
@@ -351,6 +387,16 @@ export class QuestionsService {
       tags: questionTagNames(obj),
       difficultyLevel: obj.difficultyLevel,
       source: obj.source,
+      citations: (obj.citations ?? [])
+        .slice()
+        .sort((a, b) => a.rank - b.rank)
+        .map(c => ({
+          ...c,
+          // Citations saved before chapterName existed get it derived on read.
+          chapterName: c.chapterName ?? toChapterName(c.sourceDoc),
+        })),
+      citationStatus: obj.citationStatus ?? null,
+      citationsUpdatedAt: obj.citationsUpdatedAt ?? null,
       isActive: obj.isActive,
       createdAt: obj.createdAt as Date,
       updatedAt: obj.updatedAt as Date,

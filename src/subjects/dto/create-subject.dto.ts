@@ -7,7 +7,9 @@ import {
   IsArray,
   IsMongoId,
   IsOptional,
+  ValidateIf,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class CreateSubjectDto {
   @ApiProperty({
@@ -41,4 +43,19 @@ export class CreateSubjectDto {
   @IsArray()
   @IsMongoId({ each: true })
   topics?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Key of an NCERT vector subject from instance_configs.vectorSearch.subjects (e.g. "physics"). ' +
+      'Questions in a mapped subject get citations. Send null on update to remove the mapping.',
+    example: 'physics',
+    nullable: true,
+  })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() || null : value,
+  )
+  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsString()
+  @MaxLength(60)
+  vectorSubjectKey?: string | null;
 }

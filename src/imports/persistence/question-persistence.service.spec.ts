@@ -7,6 +7,7 @@ import {
   ImportQuestion,
   PDF_IMPORT_QUESTION_SOURCE,
 } from '../types/import-question';
+import { QuestionCitationsService } from '../../citations/question-citations.service';
 
 const subjectId = '507f1f77bcf86cd799439011';
 const topicId = '507f1f77bcf86cd799439012';
@@ -40,6 +41,7 @@ function makeQuestion(overrides: Partial<ImportQuestion> = {}): ImportQuestion {
 describe('QuestionPersistenceService', () => {
   let service: QuestionPersistenceService;
   const create = jest.fn();
+  const autoAttach = jest.fn().mockResolvedValue('done');
 
   beforeEach(async () => {
     create.mockReset();
@@ -47,6 +49,7 @@ describe('QuestionPersistenceService', () => {
       providers: [
         QuestionPersistenceService,
         { provide: getModelToken(Question.name), useValue: { create } },
+        { provide: QuestionCitationsService, useValue: { autoAttach } },
       ],
     }).compile();
     service = module.get(QuestionPersistenceService);
@@ -69,6 +72,7 @@ describe('QuestionPersistenceService', () => {
     );
 
     expect(result).toBe(created);
+    expect(autoAttach).toHaveBeenCalledWith(created._id.toString());
     const payload = create.mock.calls[0][0];
     expect(payload.subject.toString()).toBe(subjectId);
     expect(payload.topic.toString()).toBe(topicId);

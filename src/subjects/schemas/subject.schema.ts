@@ -21,6 +21,13 @@ export class Subject {
   })
   topics: Types.ObjectId[];
 
+  /**
+   * Optional key into instance_configs.vectorSearch.subjects (e.g. "biology").
+   * When set, questions in this subject get NCERT citations.
+   */
+  @Prop({ type: String, trim: true, lowercase: true })
+  vectorSubjectKey?: string;
+
   @Prop({ default: true })
   isActive: boolean;
 

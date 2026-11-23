@@ -5,6 +5,10 @@ import { SubjectsController } from './subjects.controller';
 import { Subject, SubjectSchema } from './schemas/subject.schema';
 import { TopicsModule } from '../topics/topics.module';
 import { ExamsModule } from '../exams/exams.module';
+import {
+  InstanceConfig,
+  InstanceConfigSchema,
+} from '../instance-config/schemas/instance-config.schema';
 
 /**
  * SubjectsModule
@@ -17,7 +21,10 @@ import { ExamsModule } from '../exams/exams.module';
  */
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Subject.name, schema: SubjectSchema }]),
+    MongooseModule.forFeature([
+      { name: Subject.name, schema: SubjectSchema },
+      { name: InstanceConfig.name, schema: InstanceConfigSchema },
+    ]),
     TopicsModule,
     ExamsModule,
   ],

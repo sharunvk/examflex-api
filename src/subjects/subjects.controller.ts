@@ -32,6 +32,7 @@ import { GetUser } from '../auth/decorators/get-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { UserResponseDto } from '../users/dto/user-response.dto';
+import { InstanceVectorSubjectResponseDto } from '../instance-config/dto/instance-config-response.dto';
 
 @ApiTags('subjects')
 @Controller('subjects')
@@ -122,6 +123,26 @@ export class SubjectsController {
     return {
       message: 'Subjects for exam retrieved successfully',
       data: subjects,
+    };
+  }
+
+  @Get('vector-subjects')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'NCERT vector subjects a subject can map to (Admin only)',
+    description:
+      'Effective instance_configs.vectorSearch subjects, or the code defaults when none are stored.',
+  })
+  @ApiResponse({ status: 200, type: [InstanceVectorSubjectResponseDto] })
+  async listVectorSubjects(): Promise<{
+    message: string;
+    data: InstanceVectorSubjectResponseDto[];
+  }> {
+    return {
+      message: 'Vector subjects retrieved successfully',
+      data: await this.subjectsService.listVectorSubjects(),
     };
   }
 

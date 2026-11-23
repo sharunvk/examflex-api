@@ -1,0 +1,29 @@
+[
+
+
+    { "sourceDoc": "CHEMICAL_BONDING_AND_MOLECULAR_STRUCTURE.pdf", "offset": 99 , "grade" : "XI"},
+    { "sourceDoc": "Classification_of_Elements_and_Periodicity_in_Properties.pdf", "offset": 73 , "grade" : "XI"},
+    { "sourceDoc": "Equilibrium.pdf", "offset": 167 , "grade" : "XI"},
+    { "sourceDoc": "HYDROCARBONS.pdf", "offset": 194 , "grade" : "XI"},
+    { "sourceDoc": "REDOX_REACTIONS.pdf", "offset": 234 , "grade" : "XI"},
+    { "sourceDoc": "Organic_chemistry_Some_Basic_principles_and_techniques.pdf", "offset": 255 , "grade" : "XI"},
+    { "sourceDoc": "SOME_BASIC_CONCEPTS_OF_CHEMISTRY.pdf", "offset": 0 , "grade" : "XI"},
+    { "sourceDoc": "structure_of_atom.pdf", "offset": 28 , "grade" : "XI"},
+    { "sourceDoc": "Thermodynamics.pdf", "offset": 135 , "grade" : "XI"},
+    
+    
+    { "sourceDoc": "Amines.pdf", "offset": 258 , "grade" : "XII"},
+    { "sourceDoc": "Biomolecules.pdf", "offset": 280 , "grade" : "XII"},
+    { "sourceDoc": "The_d_-_and_f_-Block_Elements.pdf", "offset": 88 , "grade" : "XII"},
+    { "sourceDoc": "Solutions.pdf", "offset": 0 , "grade" : "XII"},
+    { "sourceDoc": "Haloalkanes_and_Haloarenes.pdf", "offset": 158 , "grade" : "XII"},
+    { "sourceDoc": "Electrochemistry.pdf", "offset": 30 , "grade" : "XII"},
+    { "sourceDoc": "Coordination_Compounds.pdf", "offset": 117 , "grade" : "XII"},
+    { "sourceDoc": "Chemical_Kinetics.pdf", "offset": 60 , "grade" : "XII"},
+    { "sourceDoc": "Alcohols_Phenols_and_Ethers.pdf", "offset": 192 , "grade" : "XII"},
+    { "sourceDoc": "Aldehydes_Ketones_and_Carboxylic_Acids.pdf", "offset": 226 , "grade" : "XII"}
+    
+    
+    
+    
+    ]

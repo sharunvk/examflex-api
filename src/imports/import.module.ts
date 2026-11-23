@@ -39,6 +39,7 @@ import {
 import { AwsModule } from '../aws/aws.module';
 import { MathpixModule } from '../integrations/mathpix/mathpix.module';
 import { ImportQueueModule } from '../queues/import-queue.module';
+import { CitationsModule } from '../citations/citations.module';
 import { PromptEnhancerRegistry } from './prompt-enhancers/prompt-enhancer.registry';
 import { PromptEnhancerComposer } from './prompt-enhancers/prompt-enhancer.composer';
 
@@ -55,6 +56,7 @@ import { PromptEnhancerComposer } from './prompt-enhancers/prompt-enhancer.compo
     ]),
     AwsModule,
     MathpixModule,
+    CitationsModule,
     forwardRef(() => ImportQueueModule),
   ],
   controllers: [ImportController],

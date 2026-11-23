@@ -10,7 +10,7 @@ export type MistakeTripReason = (typeof MISTAKE_TRIP_REASONS)[number];
 
 export const DEFAULT_TRIP_REASON: MistakeTripReason = 'concept-gap';
 
-export const INSIGHT_TITLE = 'The bit that changes the answer';
+export const INSIGHT_TITLE = 'Solution';
 
 export const SOURCE_HINT = 'Page link matched to your NCERT edition.';
 

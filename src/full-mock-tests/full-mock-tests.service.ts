@@ -923,7 +923,7 @@ export class FullMockTestsService {
     const docs = questionIds.length
       ? await this.questionModel
           .find({ _id: { $in: questionIds } })
-          .select('-correctAnswer -explanation')
+          .select('-explanation')
           .populate('tags', 'name')
           .lean()
           .exec()
@@ -955,6 +955,9 @@ export class FullMockTestsService {
                 };
             return {
               ...safe,
+              // Admin-only draft review: expose the right answer (option id).
+              correctAnswer: (doc as { correctAnswer?: string } | undefined)
+                ?.correctAnswer,
               position: q.position,
               marksPerQuestion: q.marksPerQuestion,
               negativeMarking: q.negativeMarking,
@@ -1005,7 +1008,7 @@ export class FullMockTestsService {
     const docs = questionIds.length
       ? await this.questionModel
           .find({ _id: { $in: questionIds } })
-          .select('-correctAnswer -explanation')
+          .select('-explanation')
           .populate('tags', 'name')
           .lean()
           .exec()
@@ -1036,6 +1039,9 @@ export class FullMockTestsService {
                 };
             return {
               ...safe,
+              // Admin-only published view: expose the right answer (option id).
+              correctAnswer: (doc as { correctAnswer?: string } | undefined)
+                ?.correctAnswer,
               // Fall back only if the id is absent from questionIds (corrupt config).
               position: position ?? -1,
               marksPerQuestion: row.marksPerQuestion,

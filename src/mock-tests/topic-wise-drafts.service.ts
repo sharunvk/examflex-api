@@ -903,7 +903,7 @@ export class TopicWiseDraftsService {
     const docs = questionIds.length
       ? await this.questionModel
           .find({ _id: { $in: questionIds } })
-          .select('-correctAnswer -explanation')
+          .select('-explanation')
           .populate('tags', 'name')
           .lean()
           .exec()
@@ -1014,6 +1014,9 @@ export class TopicWiseDraftsService {
 
     return {
       ...safe,
+      // Admin-only draft review: expose the right answer (option id).
+      correctAnswer: (doc as { correctAnswer?: string } | null | undefined)
+        ?.correctAnswer,
       position: slot.position,
       marksPerQuestion: slot.marksPerQuestion,
       negativeMarking: slot.negativeMarking,

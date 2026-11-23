@@ -27,4 +27,10 @@ export class DraftQuestionItemDto extends SafeQuestionDto {
     example: '64f123456789abcdef123456',
   })
   replacedFrom?: string;
+
+  @ApiPropertyOptional({
+    description: 'Correct option id (admin-only review)',
+    example: 'a',
+  })
+  correctAnswer?: string;
 }

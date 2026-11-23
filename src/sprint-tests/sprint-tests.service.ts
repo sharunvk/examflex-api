@@ -852,7 +852,7 @@ export class SprintTestsService {
     const docs = questionIds.length
       ? await this.questionModel
           .find({ _id: { $in: questionIds } })
-          .select('-correctAnswer -explanation')
+          .select('-explanation')
           .populate('tags', 'name')
           .lean()
           .exec()
@@ -963,6 +963,9 @@ export class SprintTestsService {
 
     return {
       ...safe,
+      // Admin-only draft review: expose the right answer (option id).
+      correctAnswer: (doc as { correctAnswer?: string } | null | undefined)
+        ?.correctAnswer,
       position: slot.position,
       marksPerQuestion: slot.marksPerQuestion,
       negativeMarking: slot.negativeMarking,
@@ -979,7 +982,7 @@ export class SprintTestsService {
     }
     const docs = await this.questionModel
       .find({ _id: { $in: ids } })
-      .select('-correctAnswer -explanation')
+      .select('-explanation')
       .populate('tags', 'name')
       .lean()
       .exec();
@@ -1003,6 +1006,9 @@ export class SprintTestsService {
             };
         return {
           ...safe,
+          // Admin-only published view: expose the right answer (option id).
+          correctAnswer: (doc as { correctAnswer?: string } | undefined)
+            ?.correctAnswer,
           position,
           marksPerQuestion: test.marksPerQuestion,
           negativeMarking: test.negativeMarking,

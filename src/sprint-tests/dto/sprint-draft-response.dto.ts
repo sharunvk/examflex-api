@@ -14,6 +14,11 @@ export class SprintQuestionItemDto extends SafeQuestionDto {
 
   @ApiPropertyOptional()
   replacedFrom?: string;
+
+  @ApiPropertyOptional({
+    description: 'Correct option id (admin-only review)',
+  })
+  correctAnswer?: string;
 }
 
 export class SprintDraftSubjectBlockDto {

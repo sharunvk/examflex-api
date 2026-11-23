@@ -225,7 +225,8 @@ export class MockTestsService {
         .populate('topic', 'name')
         .populate({
           path: 'questionIds',
-          select: 'questionText subject topic options optionType tags',
+          select:
+            'questionText subject topic options optionType tags correctAnswer',
           populate: [
             { path: 'subject', select: 'name' },
             { path: 'topic', select: 'name' },
@@ -457,6 +458,7 @@ export class MockTestsService {
         subject?: PopulatedDocument;
         topic?: PopulatedDocument;
         tags?: unknown;
+        correctAnswer?: string;
         id?: string;
       };
     });
@@ -486,6 +488,7 @@ export class MockTestsService {
           },
         },
         optionType: question.optionType,
+        correctAnswer: question.correctAnswer,
         options: (question.options || []).map(option => ({
           id: option.id,
           type: option.type,

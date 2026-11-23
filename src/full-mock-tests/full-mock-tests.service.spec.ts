@@ -513,6 +513,19 @@ describe('FullMockTestsService', () => {
       expect(result.status).toBe('REVIEW');
     });
 
+    it('exposes correctAnswer (never explanation) on admin draft review', async () => {
+      draftModel.findById.mockReturnValue(chainable(makeDraft()));
+      const query = chainable([
+        { ...questionLean(Q1), correctAnswer: 'a', explanation: 'secret' },
+      ]);
+      questionModel.find.mockReturnValue(query);
+      const result = await service.getDraft(DRAFT_ID);
+      expect(query.select).toHaveBeenCalledWith('-explanation');
+      const item = result.subjects[0].questions[0];
+      expect(item.correctAnswer).toBe('a');
+      expect(item).not.toHaveProperty('explanation');
+    });
+
     it('uses placeholder questions when documents are missing', async () => {
       draftModel.findById.mockReturnValue(chainable(makeDraft()));
       questionModel.find.mockReturnValue(chainable([]));
@@ -1469,6 +1482,25 @@ describe('FullMockTestsService', () => {
       expect(result.subjects).toBeUndefined();
     });
 
+    it('exposes correctAnswer only on the admin published view', async () => {
+      mockTestModel.findOne.mockReturnValue(chainable(published));
+      mockTestsService.getUserAttemptActions.mockResolvedValue(new Map());
+      const query = chainable([
+        { ...questionLean(Q1), correctAnswer: 'a', explanation: 'secret' },
+      ]);
+      questionModel.find.mockReturnValue(query);
+
+      const admin = await service.findOnePublished(TEST_ID, USER_ID, true);
+      expect(query.select).toHaveBeenCalledWith('-explanation');
+      const item = admin.subjects![0].questions[0];
+      expect(item.correctAnswer).toBe('a');
+      expect(item).not.toHaveProperty('explanation');
+
+      const student = await service.findOnePublished(TEST_ID, USER_ID, false);
+      expect(student.subjects).toBeUndefined();
+      expect(JSON.stringify(student)).not.toContain('correctAnswer');
+    });
+
     it('includes safe question subjects for admin detail', async () => {
       mockTestModel.findOne.mockReturnValue(chainable(published));
       mockTestsService.getUserAttemptActions.mockResolvedValue(new Map());
@@ -1487,8 +1519,11 @@ describe('FullMockTestsService', () => {
         marksPerQuestion: 2,
         negativeMarking: 0.5,
       });
+      // Admin published view exposes the right answer (undefined when the
+      // mocked question doc carries none); explanation stays hidden.
+      expect(result.subjects![0].questions[0]).toHaveProperty('correctAnswer');
       expect(result.subjects![0].questions[0]).not.toHaveProperty(
-        'correctAnswer',
+        'explanation',
       );
     });
 

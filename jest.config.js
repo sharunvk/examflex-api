@@ -48,6 +48,8 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/test/jest.setup.ts'],
   moduleNameMapper: {
     '^src/(.*)$': '<rootDir>/src/$1',
+    // ESM-only deps (uuid) break Jest's CJS loader; see test/mocks/weaviate-client.ts
+    '^weaviate-client$': '<rootDir>/test/mocks/weaviate-client.ts',
   },
   verbose: true,
   maxWorkers: 4,

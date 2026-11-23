@@ -47,6 +47,14 @@ export class SubjectResponseDto {
   @Type(() => SubjectTopicDto)
   topics: SubjectTopicDto[];
 
+  @ApiPropertyOptional({
+    description: 'NCERT vector subject key, if this subject is mapped',
+    example: 'physics',
+    nullable: true,
+  })
+  @Expose()
+  vectorSubjectKey?: string | null;
+
   @ApiProperty({
     description: 'Whether the subject is active',
     example: true,

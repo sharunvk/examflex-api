@@ -15,7 +15,8 @@
   },
   "setupFiles": ["<rootDir>/commerce/support/preload-env.ts"],
   "moduleNameMapper": {
-    "^@nestjs/observe$": "<rootDir>/commerce/support/observe-mock.ts"
+    "^@nestjs/observe$": "<rootDir>/commerce/support/observe-mock.ts",
+    "^weaviate-client$": "<rootDir>/mocks/weaviate-client.ts"
   },
   "transformIgnorePatterns": [
     "node_modules/(?!(@nestjs/observe)/)"

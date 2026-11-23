@@ -10,6 +10,7 @@ import { SubjectsService } from './subjects.service';
 import { Subject } from './schemas/subject.schema';
 import { Topic } from '../topics/schemas/topic.schema';
 import { Exam } from '../exams/schemas/exam.schema';
+import { InstanceConfig } from '../instance-config/schemas/instance-config.schema';
 
 const OID = '507f1f77bcf86cd799439011';
 const OID2 = '507f1f77bcf86cd799439012';
@@ -62,6 +63,7 @@ describe('SubjectsService', () => {
 
   const topicModel: any = { find: jest.fn() };
   const examModel: any = { aggregate: jest.fn(), exists: jest.fn() };
+  const instanceConfigModel: any = { findById: jest.fn() };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -70,6 +72,10 @@ describe('SubjectsService', () => {
         { provide: getModelToken(Subject.name), useValue: subjectModel },
         { provide: getModelToken(Topic.name), useValue: topicModel },
         { provide: getModelToken(Exam.name), useValue: examModel },
+        {
+          provide: getModelToken(InstanceConfig.name),
+          useValue: instanceConfigModel,
+        },
       ],
     }).compile();
     service = module.get(SubjectsService);
@@ -133,6 +139,106 @@ describe('SubjectsService', () => {
       await expect(service.findOne('missing')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('vectorSubjectKey', () => {
+    const configChain = (value: unknown) => chain(value);
+
+    it('accepts a key from the default NCERT mapping on create', async () => {
+      subjectModel.findOne.mockReturnValue(chain(null));
+      instanceConfigModel.findById.mockReturnValue(configChain(null));
+      subjectModel.create.mockResolvedValue(subjectDoc({ name: 'Botany' }));
+
+      await service.create({
+        name: 'Botany',
+        vectorSubjectKey: 'biology',
+      } as any);
+
+      expect(subjectModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({ vectorSubjectKey: 'biology' }),
+      );
+    });
+
+    it('omits an empty key on create', async () => {
+      subjectModel.findOne.mockReturnValue(chain(null));
+      subjectModel.create.mockResolvedValue(subjectDoc({ name: 'Art' }));
+
+      await service.create({ name: 'Art', vectorSubjectKey: null } as any);
+
+      expect(subjectModel.create.mock.calls[0][0]).not.toHaveProperty(
+        'vectorSubjectKey',
+      );
+      expect(instanceConfigModel.findById).not.toHaveBeenCalled();
+    });
+
+    it('rejects a key that is not configured', async () => {
+      subjectModel.findOne.mockReturnValue(chain(null));
+      instanceConfigModel.findById.mockReturnValue(
+        configChain({
+          vectorSearch: {
+            subjects: [{ key: 'physics', label: 'P', vectorSubjectId: 'x' }],
+          },
+        }),
+      );
+
+      await expect(
+        service.create({ name: 'Bio', vectorSubjectKey: 'biology' } as any),
+      ).rejects.toThrow(/not configured/);
+    });
+
+    it('sets the key on update', async () => {
+      instanceConfigModel.findById.mockReturnValue(configChain(null));
+      subjectModel.findByIdAndUpdate.mockReturnValue(
+        chain(subjectDoc({ name: 'Zoology', vectorSubjectKey: 'biology' })),
+      );
+
+      const result = await service.update(OID, {
+        vectorSubjectKey: 'biology',
+      } as any);
+
+      expect(subjectModel.findByIdAndUpdate.mock.calls[0][1]).toMatchObject({
+        vectorSubjectKey: 'biology',
+      });
+      expect(result.vectorSubjectKey).toBe('biology');
+    });
+
+    it('clears the key on update when null is sent', async () => {
+      subjectModel.findByIdAndUpdate.mockReturnValue(
+        chain(subjectDoc({ name: 'Zoology' })),
+      );
+
+      const result = await service.update(OID, {
+        vectorSubjectKey: null,
+      } as any);
+
+      const update = subjectModel.findByIdAndUpdate.mock.calls[0][1];
+      expect(update.$unset).toEqual({ vectorSubjectKey: 1 });
+      expect(update).not.toHaveProperty('vectorSubjectKey');
+      expect(result.vectorSubjectKey).toBeNull();
+    });
+
+    it('lists configured vector subjects, falling back to defaults', async () => {
+      instanceConfigModel.findById.mockReturnValue(configChain(null));
+      const defaults = await service.listVectorSubjects();
+      expect(defaults.map(s => s.key)).toEqual([
+        'maths',
+        'biology',
+        'chemistry',
+        'physics',
+      ]);
+    });
+
+    it('leaves the key alone when it is not sent', async () => {
+      subjectModel.findByIdAndUpdate.mockReturnValue(
+        chain(subjectDoc({ name: 'X' })),
+      );
+
+      await service.update(OID, { description: 'd' } as any);
+
+      const update = subjectModel.findByIdAndUpdate.mock.calls[0][1];
+      expect(update).not.toHaveProperty('$unset');
+      expect(update).not.toHaveProperty('vectorSubjectKey');
     });
   });
 

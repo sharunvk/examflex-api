@@ -15,6 +15,13 @@ import { SubjectResponseDto } from './dto/subject-response.dto';
 import { SubjectForExamResponseDto } from './dto/subject-for-exam-response.dto';
 import { PopulatedDocument } from '../common/types/populated-document.interface';
 import {
+  InstanceConfig,
+  InstanceConfigDocument,
+  InstanceVectorSearchConfig,
+} from '../instance-config/schemas/instance-config.schema';
+import { INSTANCE_CONFIG_ID } from '../instance-config/instance-config.constants';
+import { resolveVectorSearch } from '../instance-config/vector-search.settings';
+import {
   createdByFields,
   omitActorFields,
   updatedByFields,
@@ -29,7 +36,38 @@ export class SubjectsService {
     private topicModel: Model<TopicDocument>,
     @InjectModel(Exam.name)
     private examModel: Model<ExamDocument>,
+    @InjectModel(InstanceConfig.name)
+    private instanceConfigModel: Model<InstanceConfigDocument>,
   ) {}
+
+  /** NCERT vector subjects a subject can map to (stored, else defaults). */
+  async listVectorSubjects(): Promise<
+    { key: string; label: string; vectorSubjectId: string }[]
+  > {
+    const config = await this.instanceConfigModel
+      .findById(INSTANCE_CONFIG_ID)
+      .select('vectorSearch')
+      .lean<{ vectorSearch?: InstanceVectorSearchConfig }>()
+      .exec();
+    return resolveVectorSearch(config?.vectorSearch).subjects;
+  }
+
+  /** Rejects a vectorSubjectKey that is not in the configured vector subjects. */
+  private async assertVectorSubjectKey(
+    key: string | null | undefined,
+  ): Promise<void> {
+    if (key === null || key === undefined) {
+      return;
+    }
+    const subjects = await this.listVectorSubjects();
+    if (!subjects.some(s => s.key === key)) {
+      throw new BadRequestException(
+        `vectorSubjectKey "${key}" is not configured. Allowed: ${subjects
+          .map(s => s.key)
+          .join(', ')}`,
+      );
+    }
+  }
 
   /**
    * Create a new subject
@@ -58,8 +96,12 @@ export class SubjectsService {
       }
     }
 
+    await this.assertVectorSubjectKey(createSubjectDto.vectorSubjectKey);
+    const { vectorSubjectKey, ...rest } = createSubjectDto;
+
     const subject = await this.subjectModel.create({
-      ...createSubjectDto,
+      ...rest,
+      ...(vectorSubjectKey ? { vectorSubjectKey } : {}),
       ...createdByFields(actorUserId),
     });
     return this.toResponseDto(await subject.populate('topics', 'name'));
@@ -126,10 +168,19 @@ export class SubjectsService {
       }
     }
 
+    await this.assertVectorSubjectKey(updateSubjectDto.vectorSubjectKey);
+    const { vectorSubjectKey, ...rest } = updateSubjectDto;
+    const vectorUpdate =
+      vectorSubjectKey === null
+        ? { $unset: { vectorSubjectKey: 1 } }
+        : vectorSubjectKey !== undefined
+          ? { vectorSubjectKey }
+          : {};
+
     const subject = await this.subjectModel
       .findByIdAndUpdate(
         id,
-        { ...updateSubjectDto, ...updatedByFields(actorUserId) },
+        { ...rest, ...vectorUpdate, ...updatedByFields(actorUserId) },
         {
           new: true,
           runValidators: true,
@@ -282,6 +333,7 @@ export class SubjectsService {
     return new SubjectResponseDto({
       ...obj,
       id: obj._id?.toString() || obj.id,
+      vectorSubjectKey: obj.vectorSubjectKey ?? null,
       topics:
         obj.topics?.map((topic: unknown) => {
           const topicDoc = topic as PopulatedDocument;

@@ -14,6 +14,7 @@ describe('SubjectsController', () => {
     findOne: jest.fn(),
     update: jest.fn(),
     remove: jest.fn(),
+    listVectorSubjects: jest.fn(),
   };
 
   const admin = { id: 'admin-1' } as never;
@@ -30,6 +31,14 @@ describe('SubjectsController', () => {
       .compile();
     controller = module.get(SubjectsController);
     jest.clearAllMocks();
+  });
+
+  it('listVectorSubjects wraps data', async () => {
+    const rows = [{ key: 'physics', label: 'Physics', vectorSubjectId: 'p' }];
+    service.listVectorSubjects.mockResolvedValue(rows);
+    await expect(controller.listVectorSubjects()).resolves.toMatchObject({
+      data: rows,
+    });
   });
 
   it('create wraps data', async () => {

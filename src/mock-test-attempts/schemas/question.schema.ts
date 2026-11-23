@@ -105,6 +105,82 @@ export class Explanation {
 
 export const ExplanationSchema = SchemaFactory.createForClass(Explanation);
 
+export const CITATION_STATUSES = [
+  'pending',
+  'done',
+  'failed',
+  'skipped',
+] as const;
+export type CitationStatus = (typeof CITATION_STATUSES)[number];
+
+export const CITATION_SELECTED_BY = ['auto', 'admin'] as const;
+export type CitationSelectedBy = (typeof CITATION_SELECTED_BY)[number];
+
+/**
+ * One NCERT chunk cited by a question. The chunk is copied in full so clients
+ * read citations straight from the question without querying the vector DB.
+ */
+@Schema({ _id: false })
+export class QuestionCitation {
+  /** Weaviate object uuid. */
+  @Prop({ type: String, required: true })
+  chunkId: string;
+
+  /** 1-based order shown to users. */
+  @Prop({ type: Number, required: true, min: 1 })
+  rank: number;
+
+  @Prop({ type: String })
+  title?: string;
+
+  @Prop({ type: String })
+  content?: string;
+
+  @Prop({ type: Number })
+  chunkIndex?: number;
+
+  @Prop({ type: [String], default: undefined })
+  images?: string[];
+
+  @Prop({ type: String })
+  sourceDoc?: string;
+
+  /** Readable chapter name derived from sourceDoc (no ".pdf", spaces for "_"). */
+  @Prop({ type: String })
+  chapterName?: string;
+
+  @Prop({ type: String })
+  documentType?: string;
+
+  @Prop({ type: String })
+  grade?: string;
+
+  /** Page inside the source PDF. */
+  @Prop({ type: Number })
+  pageStart?: number;
+
+  @Prop({ type: Number })
+  ncertPageOffset?: number;
+
+  /** Printed NCERT page: pageStart + ncertPageOffset. */
+  @Prop({ type: Number })
+  pageNumber?: number;
+
+  /** Relative hybrid score at search time. */
+  @Prop({ type: Number })
+  score?: number;
+
+  /** Vector (cosine) similarity at search time. */
+  @Prop({ type: Number })
+  similarity?: number;
+
+  @Prop({ type: String, enum: CITATION_SELECTED_BY, required: true })
+  selectedBy: CitationSelectedBy;
+}
+
+export const QuestionCitationSchema =
+  SchemaFactory.createForClass(QuestionCitation);
+
 // Read-only schema for questions created by external application
 @Schema({
   collection: 'questions', // Use existing collection name
@@ -172,6 +248,16 @@ export class Question {
 
   @Prop({ type: Date })
   lastUsedInFullMockAt?: Date;
+
+  /** Ranked NCERT citations. Absent until the subject is mapped and a lookup ran. */
+  @Prop({ type: [QuestionCitationSchema], default: undefined })
+  citations?: QuestionCitation[];
+
+  @Prop({ type: String, enum: CITATION_STATUSES })
+  citationStatus?: CitationStatus;
+
+  @Prop({ type: Date })
+  citationsUpdatedAt?: Date;
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
   createdBy?: Types.ObjectId;

@@ -149,6 +149,31 @@ export class InstanceRedisResponseDto {
   removeOnFailAgeSec: number | null;
 }
 
+export class InstanceVectorSubjectResponseDto {
+  @ApiProperty({ example: 'physics' })
+  key: string;
+
+  @ApiProperty({ example: 'Physics' })
+  label: string;
+
+  @ApiProperty({ example: '6afd6aa47d65768788984fed' })
+  vectorSubjectId: string;
+}
+
+export class InstanceVectorSearchResponseDto {
+  @ApiProperty({ example: 'Ncert' })
+  collectionName: string;
+
+  @ApiProperty({ type: [InstanceVectorSubjectResponseDto] })
+  subjects: InstanceVectorSubjectResponseDto[];
+
+  @ApiProperty({
+    description:
+      'True when the values come from code defaults, not the database.',
+  })
+  isDefault: boolean;
+}
+
 export class InstanceConfigResponseDto {
   @ApiProperty({ example: 'singleton' })
   id: string;
@@ -186,6 +211,12 @@ export class InstanceConfigResponseDto {
 
   @ApiPropertyOptional({ type: InstanceRedisResponseDto, nullable: true })
   redis: InstanceRedisResponseDto | null;
+
+  @ApiProperty({
+    type: InstanceVectorSearchResponseDto,
+    description: 'Effective settings: stored values, else code defaults.',
+  })
+  vectorSearch: InstanceVectorSearchResponseDto;
 
   @ApiProperty({ example: '2026-09-28T00:00:00.000Z' })
   createdAt: Date;

@@ -122,6 +122,79 @@ describe('InstanceConfigService', () => {
     });
   });
 
+  describe('vectorSearch', () => {
+    it('returns the NCERT defaults when nothing is stored', async () => {
+      model.findById.mockReturnValue(chain(stored()));
+      const result = await service.get();
+      expect(result?.vectorSearch.collectionName).toBe('Ncert');
+      expect(result?.vectorSearch.isDefault).toBe(true);
+      expect(result?.vectorSearch.subjects.map(s => s.key)).toEqual([
+        'maths',
+        'biology',
+        'chemistry',
+        'physics',
+      ]);
+      expect(
+        result?.vectorSearch.subjects.find(s => s.key === 'physics')
+          ?.vectorSubjectId,
+      ).toBe('6afd6aa47d65768788984fed');
+    });
+
+    it('returns stored values when present', async () => {
+      model.findById.mockReturnValue(
+        chain(
+          stored({
+            vectorSearch: {
+              collectionName: 'NcertV2',
+              subjects: [
+                { key: 'physics', label: 'Physics', vectorSubjectId: 'p' },
+              ],
+            },
+          }),
+        ),
+      );
+      const result = await service.get();
+      expect(result?.vectorSearch).toEqual({
+        collectionName: 'NcertV2',
+        subjects: [{ key: 'physics', label: 'Physics', vectorSubjectId: 'p' }],
+        isDefault: false,
+      });
+    });
+
+    it('sets the collection and replaces the subject list as a whole', async () => {
+      model.findByIdAndUpdate.mockReturnValue(chain(stored()));
+      await service.update({
+        vectorSearch: {
+          collectionName: 'Ncert',
+          subjects: [
+            { key: 'biology', label: 'Biology', vectorSubjectId: 'b' },
+          ],
+        },
+      });
+      expect(model.findByIdAndUpdate.mock.calls[0][1]).toEqual({
+        $set: {
+          'vectorSearch.collectionName': 'Ncert',
+          'vectorSearch.subjects': [
+            { key: 'biology', label: 'Biology', vectorSubjectId: 'b' },
+          ],
+        },
+      });
+    });
+
+    it('rejects duplicate subject keys', async () => {
+      await expect(
+        service.update({
+          vectorSearch: {
+            subjects: [
+              { key: 'biology', label: 'B', vectorSubjectId: 'b' },
+              { key: 'biology', label: 'B2', vectorSubjectId: 'c' },
+            ],
+          },
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
   describe('update', () => {
     it('replaces only the fields that were sent', async () => {
       model.findByIdAndUpdate.mockReturnValue(

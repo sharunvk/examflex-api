@@ -1,19 +1,32 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsOptional,
   IsString,
   IsUrl,
   MaxLength,
   MinLength,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import {
   normalizeOptionalUrl,
   trimString,
 } from '../instance-config.transforms';
 import { UpdateRuntimeConfigFields } from './update-runtime-config.dto';
+import { UpdateVectorSearchConfigDto } from './update-vector-search-config.dto';
 
 export class UpdateInstanceConfigDto extends UpdateRuntimeConfigFields {
+  @ApiPropertyOptional({
+    type: UpdateVectorSearchConfigDto,
+    description:
+      'NCERT citation search: collection name and subject mappings. Read live, no restart needed.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => UpdateVectorSearchConfigDto)
+  vectorSearch?: UpdateVectorSearchConfigDto;
+
   @ApiPropertyOptional({
     description: 'Display name for this deployment',
     example: 'ExamFlex',

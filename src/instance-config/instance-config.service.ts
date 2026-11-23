@@ -27,6 +27,7 @@ import {
   InstanceSeller,
   InstanceTaxConfig,
 } from './schemas/instance-config.schema';
+import { resolveVectorSearch } from './vector-search.settings';
 
 @Injectable()
 export class InstanceConfigService {
@@ -115,6 +116,20 @@ export class InstanceConfigService {
     this.assignNested($set, 'taxConfig', dto.taxConfig);
     this.assignNested($set, 'operations', dto.operations);
     this.assignNested($set, 'redis', dto.redis);
+    if (dto.vectorSearch) {
+      if (dto.vectorSearch.collectionName !== undefined) {
+        $set['vectorSearch.collectionName'] = dto.vectorSearch.collectionName;
+      }
+      if (dto.vectorSearch.subjects !== undefined) {
+        this.assertUniqueVectorKeys(dto.vectorSearch.subjects);
+        // The list is replaced as a whole so removed mappings disappear.
+        $set['vectorSearch.subjects'] = dto.vectorSearch.subjects.map(s => ({
+          key: s.key,
+          label: s.label,
+          vectorSubjectId: s.vectorSubjectId,
+        }));
+      }
+    }
 
     if (Object.keys($set).length === 0 && Object.keys($unset).length === 0) {
       return null;
@@ -124,6 +139,18 @@ export class InstanceConfigService {
       ...(Object.keys($set).length > 0 ? { $set } : {}),
       ...(Object.keys($unset).length > 0 ? { $unset } : {}),
     };
+  }
+
+  private assertUniqueVectorKeys(subjects: { key: string }[]): void {
+    const seen = new Set<string>();
+    for (const { key } of subjects) {
+      if (seen.has(key)) {
+        throw new BadRequestException(
+          `vectorSearch.subjects has a duplicate key: ${key}`,
+        );
+      }
+      seen.add(key);
+    }
   }
 
   private assignOptionalUrl(
@@ -170,6 +197,7 @@ export class InstanceConfigService {
       taxConfig: this.toTaxConfig(config.taxConfig),
       operations: this.toOperations(config.operations),
       redis: this.toRedis(config.redis),
+      vectorSearch: resolveVectorSearch(config.vectorSearch),
       createdAt: config.createdAt,
       updatedAt: config.updatedAt,
     });

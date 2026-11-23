@@ -5,6 +5,7 @@ import { Types } from 'mongoose';
 import { QuestionsService } from './questions.service';
 import { Question } from '../mock-test-attempts/schemas/question.schema';
 import { AwsConfigService } from '../aws/config/aws.config';
+import { QuestionCitationsService } from '../citations/question-citations.service';
 
 const OID = '507f1f77bcf86cd799439011';
 const OID2 = '507f1f77bcf86cd799439012';
@@ -68,6 +69,8 @@ describe('QuestionsService', () => {
   questionModel.findOneAndUpdate = jest.fn();
   questionModel.countDocuments = jest.fn();
 
+  const citations = { autoAttach: jest.fn().mockResolvedValue('done') };
+
   const awsConfig = {
     region: 'ap-south-1',
     allowedImageBuckets: ['img-bucket'],
@@ -96,6 +99,7 @@ describe('QuestionsService', () => {
         QuestionsService,
         { provide: getModelToken(Question.name), useValue: questionModel },
         { provide: AwsConfigService, useValue: awsConfig },
+        { provide: QuestionCitationsService, useValue: citations },
       ],
     }).compile();
     service = module.get(QuestionsService);
@@ -103,6 +107,21 @@ describe('QuestionsService', () => {
   });
 
   describe('create', () => {
+    it('starts the citation lookup without waiting for it', async () => {
+      let finish: (v: string) => void = () => undefined;
+      citations.autoAttach.mockReturnValueOnce(
+        new Promise<string>(resolve => (finish = resolve)),
+      );
+      questionModel.create.mockResolvedValue({ id: OID });
+      questionModel.findOne.mockReturnValue(chain(questionDoc()));
+
+      await expect(service.create(baseDto as any)).resolves.toMatchObject({
+        id: OID,
+      });
+      expect(citations.autoAttach).toHaveBeenCalledWith(OID);
+      finish('done');
+    });
+
     it('creates a question then reloads it', async () => {
       questionModel.create.mockResolvedValue({ id: OID });
       questionModel.findOne.mockReturnValue(chain(questionDoc()));
@@ -262,6 +281,12 @@ describe('QuestionsService', () => {
   });
 
   describe('update', () => {
+    beforeEach(() => {
+      questionModel.findOne.mockReturnValue(
+        chain({ subject: new Types.ObjectId(OID) }),
+      );
+    });
+
     it('clears every stored tag when the editor sends an empty list', async () => {
       questionModel.findOneAndUpdate.mockReturnValue(chain(questionDoc()));
       await service.update(OID, {
@@ -286,7 +311,75 @@ describe('QuestionsService', () => {
       expect(
         update.tags.map((tagId: { toString(): string }) => tagId.toString()),
       ).toEqual([OID2, OID]);
+      // Only the light subject lookup used to detect a subject change.
+      expect(questionModel.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-runs automatic citations when the subject changes', async () => {
+      questionModel.findOne.mockReturnValue(
+        chain({ subject: new Types.ObjectId(OID2) }),
+      );
+      questionModel.findOneAndUpdate.mockReturnValue(
+        chain({ ...questionDoc(), subject: { _id: new Types.ObjectId(OID) } }),
+      );
+
+      await service.update(OID, { ...baseDto, subject: OID } as any);
+
+      expect(citations.autoAttach).toHaveBeenCalledWith(OID);
+    });
+
+    it('returns citations with a chapter name, deriving it for old ones', async () => {
+      const doc = questionDoc();
+      const base = doc.toObject();
+      questionModel.findOneAndUpdate.mockReturnValue(
+        chain({
+          ...doc,
+          toObject: () => ({
+            ...base,
+            citations: [
+              { chunkId: 'b', rank: 2, sourceDoc: 'LAWS_OF_MOTION.pdf' },
+              {
+                chunkId: 'a',
+                rank: 1,
+                sourceDoc: 'X.pdf',
+                chapterName: 'Stored name',
+              },
+            ],
+          }),
+        }),
+      );
+
+      const result = await service.update(OID, { explanation: { en: 'x' } });
+
+      expect(result.citations).toEqual([
+        expect.objectContaining({ chunkId: 'a', chapterName: 'Stored name' }),
+        expect.objectContaining({
+          chunkId: 'b',
+          chapterName: 'LAWS OF MOTION',
+        }),
+      ]);
+    });
+
+    it('does not re-run citations when the subject is unchanged', async () => {
+      questionModel.findOne.mockReturnValue(
+        chain({ subject: new Types.ObjectId(OID) }),
+      );
+      questionModel.findOneAndUpdate.mockReturnValue(
+        chain({ ...questionDoc(), subject: { _id: new Types.ObjectId(OID) } }),
+      );
+
+      await service.update(OID, { ...baseDto, subject: OID } as any);
+
+      expect(citations.autoAttach).not.toHaveBeenCalled();
+    });
+
+    it('skips the subject lookup when the subject is not sent', async () => {
+      questionModel.findOneAndUpdate.mockReturnValue(chain(questionDoc()));
+
+      await service.update(OID, { explanation: { en: 'x' } });
+
       expect(questionModel.findOne).not.toHaveBeenCalled();
+      expect(citations.autoAttach).not.toHaveBeenCalled();
     });
 
     it('stamps updatedBy without replacing createdBy', async () => {

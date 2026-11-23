@@ -1,5 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ImageMetadataDto } from './image-metadata.dto';
+import { CitationDto } from '../../citations/dto/citation.dto';
+import {
+  CITATION_STATUSES,
+  CitationStatus,
+} from '../../mock-test-attempts/schemas/question.schema';
 
 export class NamedRefDto {
   @ApiProperty()
@@ -98,6 +103,18 @@ export class QuestionResponseDto {
 
   @ApiPropertyOptional()
   source?: string;
+
+  @ApiPropertyOptional({
+    type: [CitationDto],
+    description: 'Ranked NCERT citations (full chunk text). Empty when none.',
+  })
+  citations?: CitationDto[];
+
+  @ApiPropertyOptional({ enum: CITATION_STATUSES, nullable: true })
+  citationStatus?: CitationStatus | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  citationsUpdatedAt?: Date | null;
 
   @ApiProperty()
   isActive: boolean;

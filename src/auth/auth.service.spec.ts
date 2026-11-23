@@ -12,6 +12,8 @@ import { StudentSessionService } from './session/student-session.service';
 import {
   ConflictException,
   ForbiddenException,
+  NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { UserRole } from '../common/enums/user-role.enum';
@@ -113,7 +115,6 @@ describe('AuthService', () => {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       expiresInSec: 7 * 24 * 60 * 60,
       client: 'web',
-      persisted: true,
     });
     mockStudentSessions.assertActive.mockResolvedValue({
       sid: 'sid-1',
@@ -492,6 +493,7 @@ describe('AuthService', () => {
         sub: user.id,
         phoneNumber: user.phoneNumber,
         role: user.role,
+        sid: 'sid-1',
       };
       mockUsersService.findOne.mockResolvedValue(user);
 
@@ -499,7 +501,48 @@ describe('AuthService', () => {
 
       expect(usersService.findOne).toHaveBeenCalledWith(payload.sub);
       expect(result).toEqual(user);
+      expect(mockStudentSessions.assertActive).toHaveBeenCalledWith(
+        'sid-1',
+        user.id,
+      );
+    });
+
+    it('rejects a student token without a sid', async () => {
+      const user = mockUsers.validStudent;
+      mockUsersService.findOne.mockResolvedValue(user);
+
+      await expect(
+        service.validateJwtPayload({ sub: user.id, role: user.role }),
+      ).rejects.toThrow(UnauthorizedException);
       expect(mockStudentSessions.assertActive).not.toHaveBeenCalled();
+    });
+
+    it('reports a deleted user as 401, not 404', async () => {
+      mockUsersService.findOne.mockRejectedValue(new NotFoundException());
+
+      await expect(
+        service.validateJwtPayload({
+          sub: 'gone',
+          role: 'student',
+          sid: 'sid-1',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('passes a session-store outage through as 503, not 401', async () => {
+      const user = mockUsers.validStudent;
+      mockUsersService.findOne.mockResolvedValue(user);
+      mockStudentSessions.assertActive.mockRejectedValue(
+        new ServiceUnavailableException(),
+      );
+
+      await expect(
+        service.validateJwtPayload({
+          sub: user.id,
+          role: user.role,
+          sid: 'sid-1',
+        }),
+      ).rejects.toThrow(ServiceUnavailableException);
     });
 
     it('requires a live Redis session when sid is present', async () => {
@@ -617,12 +660,52 @@ describe('AuthService', () => {
       );
     });
 
+    it('revokes both the bearer session and the cookie session', async () => {
+      mockStudentSessions.revokeByRefreshToken = jest.fn();
+      await service.logoutStudent(
+        { sub: mockUsers.validStudent.id, role: UserRole.USER, sid: 'sid-1' },
+        'cookie-refresh',
+      );
+      expect(mockStudentSessions.revoke).toHaveBeenCalledWith(
+        'sid-1',
+        mockUsers.validStudent.id,
+      );
+      expect(mockStudentSessions.revokeByRefreshToken).toHaveBeenCalledWith(
+        'cookie-refresh',
+      );
+    });
+
     it('revokes by refresh token when access JWT is missing', async () => {
       mockStudentSessions.revokeByRefreshToken = jest.fn();
       await service.logoutStudent(undefined, 'cookie-refresh');
       expect(mockStudentSessions.revokeByRefreshToken).toHaveBeenCalledWith(
         'cookie-refresh',
       );
+    });
+  });
+
+  describe('readBearerPayload', () => {
+    it('returns claims for a signed token even when it has expired', () => {
+      mockJwtService.verify = jest
+        .fn()
+        .mockReturnValue({ sub: 'u1', role: 'student', sid: 'sid-1' });
+      expect(service.readBearerPayload('Bearer abc.def.ghi')).toEqual({
+        sub: 'u1',
+        role: 'student',
+        sid: 'sid-1',
+      });
+      expect(mockJwtService.verify).toHaveBeenCalledWith('abc.def.ghi', {
+        ignoreExpiration: true,
+      });
+    });
+
+    it('returns undefined for missing, malformed or forged tokens', () => {
+      mockJwtService.verify = jest.fn(() => {
+        throw new Error('invalid signature');
+      });
+      expect(service.readBearerPayload(undefined)).toBeUndefined();
+      expect(service.readBearerPayload('Basic abc')).toBeUndefined();
+      expect(service.readBearerPayload('Bearer forged')).toBeUndefined();
     });
   });
 

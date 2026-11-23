@@ -33,6 +33,19 @@ import {
 } from './schemas/full-mock-test-draft.schema';
 import { CreateDraftDto } from './dto/create-draft.dto';
 import { PublishDraftDto } from './dto/publish-draft.dto';
+import { UpdateCourseCutoffsDto } from './dto/course-cutoff.dto';
+import {
+  duplicateOfferingIds,
+  mergeCutoffs,
+  normalizeCutoffInput,
+  NormalizedCourseCutoff,
+  paperTotalMarks,
+} from './course-cutoffs';
+import {
+  RecommendationOffering,
+  RecommendationOfferingDocument,
+} from '../recommendations/schemas/recommendation-offering.schema';
+import { RecommendationKind } from '../recommendations/enums/recommendation-kind.enum';
 import { FullMockExamListItemDto } from './dto/exam-list-item.dto';
 import {
   DraftResponseDto,
@@ -72,6 +85,8 @@ export class FullMockTestsService {
     private readonly mockTestModel: Model<MockTestDocument>,
     @InjectModel(FullMockTestDraft.name)
     private readonly draftModel: Model<FullMockTestDraftDocument>,
+    @InjectModel(RecommendationOffering.name)
+    private readonly offeringModel: Model<RecommendationOfferingDocument>,
     private readonly selectionService: FullMockSelectionService,
     private readonly mockTestsService: MockTestsService,
     private readonly imageUrlResolver: ImageUrlResolver,
@@ -151,6 +166,18 @@ export class FullMockTestsService {
               return id ? subjectNameById.get(id) || id : undefined;
             })
             .filter((name): name is string => Boolean(name)),
+          subjectDetails: Array.from(exam.subjects || [])
+            .map(row => {
+              const id = this.subjectIdFromRow(row);
+              return id
+                ? {
+                    subjectId: id,
+                    name: subjectNameById.get(id) || id,
+                    numberOfQuestions: row.numberOfQuestions || 0,
+                  }
+                : undefined;
+            })
+            .filter((detail): detail is NonNullable<typeof detail> => !!detail),
           mode: exam.isSessionWise ? 'Session-wise' : 'Mixed',
         };
       }),
@@ -185,7 +212,10 @@ export class FullMockTestsService {
     }
 
     const { questions, subjectNames } =
-      await this.selectionService.generatePaper(exam);
+      await this.selectionService.generatePaper(
+        exam,
+        dto.difficultyDistribution,
+      );
     const arranged = this.selectionService.arrangePaperQuestions(
       questions,
       exam.subjects,
@@ -501,6 +531,13 @@ export class FullMockTestsService {
     }
     await this.assertQuestionsEligibleForPublish(questionIds);
 
+    const courseCutoffs = normalizeCutoffInput(dto.courseCutoffs ?? []);
+    await this.assertCourseCutoffs(
+      draft.exam,
+      courseCutoffs,
+      paperTotalMarks(snapshot),
+    );
+
     const subjectConfig = snapshot.subjects.map(row => {
       const indices = ordered
         .map((q, i) => ({ q, i }))
@@ -547,6 +584,14 @@ export class FullMockTestsService {
       totalMarks: snapshot.totalMarks,
       isSessionWise: snapshot.isSessionWise,
       subjectConfig,
+      ...(courseCutoffs.length > 0
+        ? {
+            courseCutoffs: courseCutoffs.map(entry => ({
+              offering: new Types.ObjectId(entry.offeringId),
+              cutoffMarks: entry.cutoffMarks as number,
+            })),
+          }
+        : {}),
       passingScore: dto.passingScore,
       allowRetake: dto.allowRetake ?? true,
       shuffleOptions: dto.shuffleOptions ?? false,
@@ -640,13 +685,17 @@ export class FullMockTestsService {
     return {
       data: tests.map(test => {
         const entry = userActions.get(test._id.toString());
-        return this.toListItem(
+        const item = this.toListItem(
           test,
           entry?.action ?? UserAttemptAction.START,
           entry?.resumeAttemptId,
           accessMap.get(test._id.toString()),
           entry?.attemptSummary,
         );
+        if (includeInactive) {
+          item.courseCutoffs = this.toCourseCutoffDtos(test);
+        }
+        return item;
       }),
       pagination: {
         total,
@@ -704,8 +753,156 @@ export class FullMockTestsService {
     );
     if (includeQuestions) {
       item.subjects = await this.toPublishedSubjects(test);
+      item.courseCutoffs = this.toCourseCutoffDtos(test);
     }
     return item;
+  }
+
+  /**
+   * Admin-only. Upsert / clear per-course cut-offs on a published full mock.
+   * Touches `courseCutoffs` (and the audit actor) and nothing else, so the
+   * frozen paper snapshot can never change through this path.
+   */
+  async updateCourseCutoffs(
+    id: string,
+    dto: UpdateCourseCutoffsDto,
+    actorUserId?: string,
+  ): Promise<FullMockTestListItemDto> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid mock test ID');
+    }
+
+    const test = await this.mockTestModel
+      .findOne({ _id: id, paperType: PaperType.FULL_EXAM })
+      .exec();
+    if (!test) {
+      throw new NotFoundException('Full mock test not found');
+    }
+
+    const incoming = normalizeCutoffInput(dto.courseCutoffs);
+    await this.assertCourseCutoffs(
+      test.exam,
+      incoming,
+      paperTotalMarks({
+        totalMarks: test.totalMarks,
+        subjects: test.subjectConfig,
+      }),
+    );
+
+    const merged = mergeCutoffs(test.courseCutoffs ?? [], incoming);
+    const updated = await this.mockTestModel
+      .findOneAndUpdate(
+        { _id: id, paperType: PaperType.FULL_EXAM },
+        {
+          $set: {
+            courseCutoffs: merged.map(entry => ({
+              offering: new Types.ObjectId(entry.offeringId),
+              cutoffMarks: entry.cutoffMarks,
+            })),
+            ...updatedByFields(actorUserId),
+          },
+        },
+        { new: true },
+      )
+      .populate('exam', '_id name description')
+      .exec();
+    if (!updated) {
+      throw new NotFoundException('Full mock test not found');
+    }
+
+    const item = this.toListItem(updated, UserAttemptAction.START);
+    item.courseCutoffs = this.toCourseCutoffDtos(updated);
+    return item;
+  }
+
+  private toCourseCutoffDtos(test: MockTestDocument) {
+    return (test.courseCutoffs ?? []).map(entry => ({
+      offeringId: entry.offering.toString(),
+      cutoffMarks: entry.cutoffMarks,
+    }));
+  }
+
+  /**
+   * Every cut-off being set must point at an active COURSE of the paper's
+   * exam and sit inside the paper's mark range. Entries that only clear a
+   * cut-off (`null`) are not checked against the course, so an admin can
+   * still remove a cut-off for a course that was deactivated since.
+   */
+  private async assertCourseCutoffs(
+    examId: Types.ObjectId,
+    entries: NormalizedCourseCutoff[],
+    totalMarks: number,
+  ): Promise<void> {
+    if (entries.length === 0) {
+      return;
+    }
+
+    const duplicates = duplicateOfferingIds(entries);
+    if (duplicates.length > 0) {
+      throw new BadRequestException({
+        message: 'Each course can have only one cut-off',
+        error: 'DUPLICATE_COURSE_CUTOFF',
+        details: { offeringIds: duplicates },
+      });
+    }
+
+    const setting = entries.filter(entry => entry.cutoffMarks !== null);
+    if (setting.length === 0) {
+      return;
+    }
+
+    const offerings = await this.offeringModel
+      .find({
+        _id: { $in: setting.map(e => new Types.ObjectId(e.offeringId)) },
+      })
+      .select('exam kind isActive')
+      .exec();
+    const byId = new Map(offerings.map(o => [o._id.toString(), o]));
+
+    const missing = setting
+      .filter(entry => !byId.has(entry.offeringId))
+      .map(entry => entry.offeringId);
+    if (missing.length > 0) {
+      throw new BadRequestException({
+        message: 'Course not found',
+        error: 'COURSE_NOT_FOUND',
+        details: { offeringIds: missing },
+      });
+    }
+
+    const ineligible = setting
+      .filter(entry => {
+        const offering = byId.get(entry.offeringId)!;
+        return (
+          offering.kind !== RecommendationKind.COURSE ||
+          offering.isActive !== true ||
+          offering.exam.toString() !== examId.toString()
+        );
+      })
+      .map(entry => entry.offeringId);
+    if (ineligible.length > 0) {
+      throw new BadRequestException({
+        message:
+          "Cut-offs can only be set for active courses of this paper's exam",
+        error: 'COURSE_NOT_ELIGIBLE',
+        details: { offeringIds: ineligible },
+      });
+    }
+
+    const outOfRange = setting
+      .filter(
+        entry =>
+          (entry.cutoffMarks as number) <= 0 ||
+          (totalMarks > 0 && (entry.cutoffMarks as number) > totalMarks),
+      )
+      .map(entry => entry.offeringId);
+    if (outOfRange.length > 0) {
+      throw new BadRequestException({
+        message: `Cut-off must be greater than 0 and at most the paper's total marks (${totalMarks})`,
+        error: 'CUTOFF_OUT_OF_RANGE',
+        details: { offeringIds: outOfRange, totalMarks },
+      });
+    }
   }
 
   private async loadDraft(draftId: string): Promise<FullMockTestDraftDocument> {
@@ -726,7 +923,7 @@ export class FullMockTestsService {
     const docs = questionIds.length
       ? await this.questionModel
           .find({ _id: { $in: questionIds } })
-          .select('-correctAnswer -explanation')
+          .select('-explanation')
           .populate('tags', 'name')
           .lean()
           .exec()
@@ -758,6 +955,9 @@ export class FullMockTestsService {
                 };
             return {
               ...safe,
+              // Admin-only draft review: expose the right answer (option id).
+              correctAnswer: (doc as { correctAnswer?: string } | undefined)
+                ?.correctAnswer,
               position: q.position,
               marksPerQuestion: q.marksPerQuestion,
               negativeMarking: q.negativeMarking,
@@ -808,7 +1008,7 @@ export class FullMockTestsService {
     const docs = questionIds.length
       ? await this.questionModel
           .find({ _id: { $in: questionIds } })
-          .select('-correctAnswer -explanation')
+          .select('-explanation')
           .populate('tags', 'name')
           .lean()
           .exec()
@@ -839,6 +1039,9 @@ export class FullMockTestsService {
                 };
             return {
               ...safe,
+              // Admin-only published view: expose the right answer (option id).
+              correctAnswer: (doc as { correctAnswer?: string } | undefined)
+                ?.correctAnswer,
               // Fall back only if the id is absent from questionIds (corrupt config).
               position: position ?? -1,
               marksPerQuestion: row.marksPerQuestion,

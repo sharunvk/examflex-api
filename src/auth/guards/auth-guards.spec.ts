@@ -129,7 +129,7 @@ describe('Auth Guards and Strategies', () => {
       };
       mockAuthService.validateJwtPayload.mockResolvedValue(mockUser);
 
-      const result = await jwtStrategy.validate({} as never, payload);
+      const result = await jwtStrategy.validate(payload);
 
       expect(result).toEqual(mockUser);
       expect(authService.validateJwtPayload).toHaveBeenCalledWith(payload);
@@ -145,7 +145,7 @@ describe('Auth Guards and Strategies', () => {
         new UnauthorizedException(),
       );
 
-      await expect(jwtStrategy.validate({} as never, payload)).rejects.toThrow(
+      await expect(jwtStrategy.validate(payload)).rejects.toThrow(
         UnauthorizedException,
       );
     });

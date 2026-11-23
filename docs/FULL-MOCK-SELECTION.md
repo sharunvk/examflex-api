@@ -125,6 +125,25 @@ Each picked question stores on the draft:
 
 ---
 
+## Explicit difficulty split (optional)
+
+`POST /full-mock-tests/drafts` accepts an optional `difficultyDistribution`:
+
+```json
+{
+  "examId": "...",
+  "difficultyDistribution": [
+    { "subjectId": "...", "easy": 8, "medium": 10, "hard": 7 }
+  ]
+}
+```
+
+- Must list **every** exam subject exactly once; `easy + medium + hard` must equal that subject's `numberOfQuestions`. Otherwise HTTP 400 `DIFFICULTY_DISTRIBUTION_INVALID`; `details[]` has one `{ rule, subjectName, message, ... }` per problem.
+- Before sampling, the bank is counted per (subject, difficulty). If any cell is short, nothing is saved and HTTP 400 `BANK_SHORTAGE` lists **all** shortages in `details[]`: `{ subjectName, difficulty, needed, available, message }`.
+- Sampling then runs per subject, per difficulty (easy → medium → hard), with the same topic-proportional quotas and usage-weighted lottery described above, restricted to that difficulty.
+- When `difficultyDistribution` is omitted, behaviour is unchanged (no difficulty control).
+- `GET /full-mock-tests/exams` items include `subjectDetails[]` (`subjectId`, `name`, `numberOfQuestions`) so the admin UI can build the split.
+
 ## Usage accounting
 
 On **publish only**:

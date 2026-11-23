@@ -8,6 +8,27 @@ export class EquationNamedRefDto {
   name: string;
 }
 
+/** Raw stored image metadata. Admins only; students get `imageUrl`. */
+export class EquationImageDto {
+  @ApiProperty()
+  key: string;
+
+  @ApiProperty()
+  bucket: string;
+
+  @ApiPropertyOptional()
+  region?: string;
+
+  @ApiPropertyOptional()
+  contentType?: string;
+
+  @ApiPropertyOptional()
+  size?: number;
+
+  @ApiPropertyOptional()
+  lastModified?: Date | string;
+}
+
 export class EquationResponseDto {
   @ApiProperty()
   id: string;
@@ -30,6 +51,19 @@ export class EquationResponseDto {
   @ApiProperty({ type: [String] })
   bulletPoints: string[];
 
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Pre-signed URL (1 hour) of the equation picture. Absent when the equation has no image.',
+  })
+  imageUrl?: string | null;
+
+  @ApiPropertyOptional({
+    type: EquationImageDto,
+    description: 'Stored image metadata. Returned to admins only.',
+  })
+  image?: EquationImageDto;
+
   @ApiProperty({ type: EquationNamedRefDto })
   subject: EquationNamedRefDto | string;
 
@@ -38,6 +72,12 @@ export class EquationResponseDto {
 
   @ApiProperty({ type: [EquationNamedRefDto] })
   exams: Array<EquationNamedRefDto | string>;
+
+  @ApiProperty({
+    description: 'Display priority; higher numbers are listed first.',
+    default: 0,
+  })
+  sortOrder: number;
 
   @ApiProperty()
   isActive: boolean;

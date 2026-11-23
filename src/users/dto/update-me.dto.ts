@@ -1,7 +1,6 @@
 import {
   IsOptional,
   IsString,
-  IsEmail,
   IsEnum,
   IsDateString,
   MinLength,
@@ -12,19 +11,21 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsValidPhone } from '../../common/validators/is-valid-phone.validator';
-import { IsProperName } from '../../common/validators/is-proper-name.validator';
+import { sanitizePersonName } from '../../common/person-name';
+import { IsPersonName } from '../../common/validators/is-person-name.validator';
 import { Gender } from '../../common/enums/gender.enum';
 import { LocationDto } from './update-profile.dto';
 
 /**
  * Unified DTO for the authenticated user to update their own profile.
- * Covers both core identity fields (name / email / phone) and extended
+ * Covers both core identity fields (name / email) and extended
  * profile fields (bio, avatar, location, target exam, etc.) in a single
  * request — so the frontend needs just one PATCH /users/me call.
  *
- * Note: uniqueness checks for email/phone are enforced at the service layer,
- * not here, so we intentionally omit @IsUniqueEmail / @IsUniquePhone.
+ * Note: the phone number is intentionally absent. It can only be set by
+ * proving ownership with an OTP (POST /users/me/phone/verify). The email is
+ * likewise only set through POST /users/me/email/verify; it stays on this DTO
+ * so older clients that still send it get a clear EMAIL_VERIFICATION_REQUIRED.
  */
 export class UpdateMeDto {
   // ── Core identity ─────────────────────────────────────────────────────────
@@ -34,53 +35,19 @@ export class UpdateMeDto {
   @IsString()
   @MinLength(2)
   @MaxLength(100)
-  @IsProperName({
-    message: 'Name can only contain letters, spaces, hyphens, and apostrophes',
-  })
-  @Transform(({ value }) => {
-    if (typeof value === 'string') {
-      return value
-        .trim()
-        .replace(/\s+/g, ' ')
-        .split(' ')
-        .map(
-          (w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(),
-        )
-        .join(' ');
-    }
-    return value;
-  })
+  @IsPersonName()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? sanitizePersonName(value) : value,
+  )
   name?: string;
 
   @ApiPropertyOptional({
-    description: 'Email address',
-    example: 'rahul@example.com',
+    description:
+      'Not accepted: always rejected with EMAIL_VERIFICATION_REQUIRED. Use POST /users/me/email/verify.',
+    deprecated: true,
   })
   @IsOptional()
-  @IsEmail({}, { message: 'Please provide a valid email address' })
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim().toLowerCase() : value,
-  )
-  email?: string;
-
-  @ApiPropertyOptional({
-    description: 'Phone number with country code',
-    example: '+911234567890',
-  })
-  @IsOptional()
-  @IsString()
-  @IsValidPhone({
-    message: 'Please provide a valid phone number with country code',
-  })
-  @Transform(({ value }) => {
-    if (typeof value === 'string') {
-      let cleaned = value.trim().replace(/[^\d+]/g, '');
-      if (!cleaned.startsWith('+')) cleaned = '+' + cleaned;
-      return cleaned;
-    }
-    return value;
-  })
-  phoneNumber?: string;
+  email?: unknown;
 
   // ── Extended profile ──────────────────────────────────────────────────────
 

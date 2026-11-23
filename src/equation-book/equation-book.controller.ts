@@ -85,17 +85,23 @@ export class EquationBookController {
     @Query('subjectId') subjectId?: string,
     @Query('topicId') topicId?: string,
     @Query('search') search?: string,
+    @GetUser() user?: UserResponseDto,
   ): Promise<{
     message: string;
     data: EquationResponseDto[];
     pagination: PaginatedEquationsResponseDto['pagination'];
   }> {
-    const result = await this.equationBookService.findAll(page, limit, {
-      examId,
-      subjectId,
-      topicId,
-      search,
-    });
+    const result = await this.equationBookService.findAll(
+      page,
+      limit,
+      {
+        examId,
+        subjectId,
+        topicId,
+        search,
+      },
+      user?.role === UserRole.ADMIN,
+    );
     return {
       message: 'Equations retrieved successfully',
       data: result.data,
@@ -110,8 +116,12 @@ export class EquationBookController {
   @ApiNotFoundResponse({ description: 'Equation not found' })
   async findOne(
     @Param('id') id: string,
+    @GetUser() user?: UserResponseDto,
   ): Promise<{ message: string; data: EquationResponseDto }> {
-    const data = await this.equationBookService.findOne(id);
+    const data = await this.equationBookService.findOne(
+      id,
+      user?.role === UserRole.ADMIN,
+    );
     return { message: 'Equation retrieved successfully', data };
   }
 

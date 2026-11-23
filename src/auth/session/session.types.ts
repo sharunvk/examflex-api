@@ -1,8 +1,15 @@
 export type AuthClient = 'web' | 'mobile';
 
+export interface PreviousRefresh {
+  hash: string;
+  rotatedAt: number;
+}
+
 export interface StudentSessionRecord {
   userId: string;
   refreshTokenHash: string;
+  /** Rotated-out refresh hashes (newest first) for grace + reuse detection. */
+  previousRefreshes?: PreviousRefresh[];
   createdAt: string;
   expiresAt: string;
   lastSeenAt: string;
@@ -17,8 +24,6 @@ export interface CreatedStudentSession {
   expiresAt: Date;
   expiresInSec: number;
   client: AuthClient;
-  /** False when Redis write failed and the caller should issue a legacy JWT. */
-  persisted: boolean;
 }
 
 export interface ResolvedStudentSession {
@@ -26,6 +31,6 @@ export interface ResolvedStudentSession {
   userId: string;
   expiresAt: Date;
   client: AuthClient;
-  /** True when Redis was skipped (cache hit, degraded, or forced). */
+  /** True when served from the in-process sid cache. */
   fromCache: boolean;
 }

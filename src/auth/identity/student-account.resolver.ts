@@ -1,3 +1,4 @@
+import { placeholderEmailFor } from '../../users/placeholder-email';
 import {
   ConflictException,
   Injectable,
@@ -45,11 +46,12 @@ export class StudentAccountResolver {
     const existingUser = await this.usersService.findByPhone(phoneNumber);
     if (existingUser) {
       this.assertStudentCanSignIn(existingUser);
+      await this.stampPhoneVerified(existingUser.id);
       return { user: existingUser, isNewUser: false };
     }
 
     const tempName = `User ${phoneNumber.slice(-4)}`;
-    const tempEmail = `user${phoneNumber.replace(/\D/g, '')}@temp.examflex.com`;
+    const tempEmail = placeholderEmailFor(phoneNumber);
     const createUserDto: CreateUserDto = {
       name: tempName,
       email: tempEmail,
@@ -58,10 +60,35 @@ export class StudentAccountResolver {
 
     try {
       const user = await this.usersService.create(createUserDto);
+      await this.stampPhoneVerified(user.id);
       return { user, isNewUser: true };
     } catch (error) {
+      if (error instanceof ConflictException) {
+        // Two sign-ins for a brand-new number raced; the unique phone index
+        // let one win. Sign the other into that account.
+        const winner = await this.usersService.findByPhone(phoneNumber);
+        if (winner) {
+          this.assertStudentCanSignIn(winner);
+          await this.stampPhoneVerified(winner.id);
+          return { user: winner, isNewUser: false };
+        }
+      }
       this.logger.error('Failed to create new user:', error.message);
       throw new UnauthorizedException('Failed to create user account');
+    }
+  }
+
+  /**
+   * An OTP sign-in proves ownership of the number. Recording that must never
+   * block signing in, so failures are logged and swallowed.
+   */
+  private async stampPhoneVerified(userId: string): Promise<void> {
+    try {
+      await this.usersService.markPhoneVerified(userId);
+    } catch (error) {
+      this.logger.warn(
+        `Could not stamp phone as verified for ${userId}: ${error?.message}`,
+      );
     }
   }
 

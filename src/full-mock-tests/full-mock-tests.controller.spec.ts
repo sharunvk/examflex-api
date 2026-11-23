@@ -18,6 +18,7 @@ describe('FullMockTestsController', () => {
     discardDraft: jest.fn(),
     listPublished: jest.fn(),
     findOnePublished: jest.fn(),
+    updateCourseCutoffs: jest.fn(),
   };
   const admin = { id: 'a1', role: UserRole.ADMIN };
   const student = { id: 's1', role: UserRole.USER };
@@ -117,5 +118,37 @@ describe('FullMockTestsController', () => {
       controller.findOne('t1', student as any),
     ).resolves.toMatchObject({ data: { id: 't1' } });
     expect(service.findOnePublished).toHaveBeenCalledWith('t1', 's1', false);
+  });
+
+  it('delegates course cut-off edits to the service with the acting admin', async () => {
+    const dto = {
+      courseCutoffs: [
+        { offeringId: 'o1', cutoffMarks: 620 },
+        { offeringId: 'o2', cutoffMarks: null },
+      ],
+    };
+    service.updateCourseCutoffs.mockResolvedValue({
+      id: 't1',
+      courseCutoffs: [{ offeringId: 'o1', cutoffMarks: 620 }],
+    });
+
+    await expect(
+      controller.updateCourseCutoffs('t1', dto as any, admin as any),
+    ).resolves.toEqual({
+      message: 'Course cut-offs updated successfully',
+      data: {
+        id: 't1',
+        courseCutoffs: [{ offeringId: 'o1', cutoffMarks: 620 }],
+      },
+    });
+    expect(service.updateCourseCutoffs).toHaveBeenCalledWith('t1', dto, 'a1');
+  });
+
+  it('protects the cut-off route with the admin role', () => {
+    const roles = Reflect.getMetadata(
+      'roles',
+      FullMockTestsController.prototype.updateCourseCutoffs,
+    );
+    expect(roles).toEqual([UserRole.ADMIN]);
   });
 });

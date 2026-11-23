@@ -91,10 +91,10 @@ function buildNextStep(
   if (mode === 'empty') {
     return {
       eyebrow: 'START HERE',
-      title: 'Your first step is one mock.',
-      body: 'Take a full-syllabus mock. Misses land in your Mistake Book for calm review, and you get a score you can build on.',
-      ctaLabel: 'Take your first mock  →',
-      ctaHref: `/mocks/exam/${examId}/full-mocks`,
+      title: 'Your first step is a quick revision.',
+      body: "Let's flex some equations.",
+      ctaLabel: 'Open Equation Book  →',
+      ctaHref: '/equation-book',
       aside: 'Small start. Real progress.',
       showPath: true,
     };
@@ -134,10 +134,10 @@ function buildSessionPlan(
   // All steps stay visually "active" for now; wire real progress later.
   if (mode === 'empty' || !hasFullMocks) {
     return {
-      eyebrow: 'TODAY, KEEP IT LIGHT',
+      eyebrow: 'START WITH A BREATH',
       title: 'Your 20-minute reset',
       steps: [
-        step('01', 'Take your first mock', 'active'),
+        step('01', 'Take a chapter-wise mock', 'active'),
         step('02', 'Understand your saved mistakes', 'active'),
         step('03', 'Recall your first equations', 'active'),
       ],
@@ -145,7 +145,7 @@ function buildSessionPlan(
   }
 
   const steps: TodaySessionStepDto[] = [
-    step('01', 'Take your first mock', 'active'),
+    step('01', 'Take a chapter-wise mock', 'active'),
   ];
 
   if (totalMistakes > 0) {
@@ -164,7 +164,7 @@ function buildSessionPlan(
   }
 
   return {
-    eyebrow: 'TODAY, KEEP IT LIGHT',
+    eyebrow: 'START WITH A BREATH',
     title: 'Your 20-minute reset',
     steps,
   };

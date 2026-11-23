@@ -45,11 +45,16 @@ export class RecommendationOfferingResponseDto {
   @Expose()
   description?: string;
 
-  @ApiProperty({ example: 75 })
+  @ApiPropertyOptional({
+    example: 75,
+    deprecated: true,
+    description:
+      'DEPRECATED legacy value; pathways use per-mock cut-off marks.',
+  })
   @Expose()
-  minPercent: number;
+  minPercent?: number;
 
-  @ApiPropertyOptional({ example: 85 })
+  @ApiPropertyOptional({ example: 85, deprecated: true })
   @Expose()
   comfortPercent?: number;
 

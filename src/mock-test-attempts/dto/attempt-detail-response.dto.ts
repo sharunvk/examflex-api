@@ -66,6 +66,13 @@ class AttemptQuestionDto {
   subject: string;
 
   @ApiPropertyOptional({
+    description:
+      'Display name of the question subject. Present when the subject could be resolved.',
+    example: 'Physics',
+  })
+  subjectName?: string;
+
+  @ApiPropertyOptional({
     description: 'Question difficulty',
     enum: ['easy', 'medium', 'hard'],
   })
@@ -105,6 +112,13 @@ class AttemptQuestionDto {
 }
 
 class TestMetadataDto {
+  @ApiPropertyOptional({
+    description:
+      'Id of the mock test (paper) this attempt belongs to. Used to deep-link to the Mistake Book session for the paper.',
+    example: '64f123456789abcdef123456',
+  })
+  mockTestId?: string;
+
   @ApiProperty({ description: 'Mock test title' })
   title: string;
 

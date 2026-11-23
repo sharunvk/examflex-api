@@ -1,5 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types, Query } from 'mongoose';
+import {
+  ImageMetadata,
+  ImageMetadataSchema,
+} from '../../mock-test-attempts/schemas/question.schema';
 
 export type EquationDocument = Equation & Document;
 
@@ -27,6 +31,13 @@ export class Equation {
   @Prop({ type: [String], default: [] })
   bulletPoints: string[];
 
+  /**
+   * Optional picture shown with the equation (diagram, derivation...). Stored
+   * like question images: S3 key + bucket, signed on read. Absent / null = none.
+   */
+  @Prop({ type: ImageMetadataSchema })
+  image?: ImageMetadata | null;
+
   @Prop({
     type: Types.ObjectId,
     ref: 'Subject',
@@ -53,6 +64,13 @@ export class Equation {
     },
   })
   exams: Types.ObjectId[];
+
+  /**
+   * Display priority. Higher numbers are listed first (2 before 1 before 0).
+   * Equations sharing a value have no guaranteed relative order.
+   */
+  @Prop({ type: Number, default: 0 })
+  sortOrder: number;
 
   @Prop({ default: true })
   isActive: boolean;

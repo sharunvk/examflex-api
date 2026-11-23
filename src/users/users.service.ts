@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -24,6 +25,7 @@ import { UpdatePreferencesDto } from './dto/update-preferences.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UserRole } from '../common/enums/user-role.enum';
+import { isPlaceholderEmail } from './placeholder-email';
 import { OrderStatus } from '../common/enums/order-status.enum';
 import { TaxInvoiceStatus } from '../common/enums/tax-invoice-status.enum';
 import { Order, OrderDocument } from '../orders/schemas/order.schema';
@@ -306,9 +308,38 @@ export class UsersService {
       }
     }
 
-    const updatedUser = await this.userModel
-      .findByIdAndUpdate(id, updateUserDto, { new: true })
-      .exec();
+    const update: Record<string, unknown> = { $set: { ...updateUserDto } };
+
+    // A number changed outside the OTP flow has not been proven, so it must
+    // not inherit the old number's verified stamp. Re-saving the same number
+    // (an admin form sends every field) leaves the stamp alone.
+    if (updateUserDto.phoneNumber !== undefined) {
+      const current = await this.userModel
+        .findById(id)
+        .select('phoneNumber')
+        .lean()
+        .exec();
+      if (!current) {
+        throw new NotFoundException(`User with ID "${id}" not found`);
+      }
+      if (current.phoneNumber !== updateUserDto.phoneNumber) {
+        update.$unset = { phoneVerifiedAt: 1 };
+      }
+    }
+
+    let updatedUser;
+    try {
+      updatedUser = await this.userModel
+        .findByIdAndUpdate(id, update, { new: true })
+        .exec();
+    } catch (error) {
+      if ((error as { code?: number })?.code === 11000) {
+        throw new ConflictException(
+          'User with this email or phone number already exists',
+        );
+      }
+      throw error;
+    }
 
     if (!updatedUser) {
       throw new NotFoundException(`User with ID "${id}" not found`);
@@ -336,6 +367,10 @@ export class UsersService {
           $unset: {
             phoneNumber: 1,
             googleSub: 1,
+            // Verification belonged to the number that was just released, and
+            // a restored account should confirm its details again.
+            phoneVerifiedAt: 1,
+            onboardingCompletedAt: 1,
           },
         },
         { new: true },
@@ -501,19 +536,35 @@ export class UsersService {
    * profile fields (bio, avatar, location, target exam, etc.) in one DB write.
    */
   async updateMe(id: string, dto: UpdateMeDto): Promise<UserResponseDto> {
-    // Uniqueness check for email / phone (exclude the caller's own document)
-    if (dto.email || dto.phoneNumber) {
-      const conflict = await this.userModel.findOne({
-        _id: { $ne: id },
-        $or: [
-          ...(dto.email ? [{ email: dto.email }] : []),
-          ...(dto.phoneNumber ? [{ phoneNumber: dto.phoneNumber }] : []),
-        ],
-      });
-      if (conflict) {
-        throw new ConflictException(
-          'Another account already uses this email or phone number',
-        );
+    // Neither contact field is editable here. The phone number can only be set
+    // by proving ownership with an OTP (see setVerifiedPhone), and so can the
+    // email (see setVerifiedEmail): Google sign-in links accounts by email, so
+    // an unproven address could capture someone else's Google sign-in.
+    //
+    // Re-sending the account's current real email (a client that always posts
+    // the whole form) is accepted and ignored, so those saves keep working.
+    if (dto.email !== undefined) {
+      const current = await this.userModel
+        .findById(id)
+        .select('email')
+        .lean()
+        .exec();
+      if (!current) {
+        throw new NotFoundException(`User with ID "${id}" not found`);
+      }
+      const sent =
+        typeof dto.email === 'string' ? dto.email.trim().toLowerCase() : null;
+      const unchanged =
+        sent !== null &&
+        Boolean(current.email) &&
+        !isPlaceholderEmail(current.email) &&
+        current.email.toLowerCase() === sent;
+      if (!unchanged) {
+        throw new BadRequestException({
+          statusCode: 400,
+          error: 'EMAIL_VERIFICATION_REQUIRED',
+          message: 'Verify your email with a code to add it.',
+        });
       }
     }
 
@@ -522,8 +573,6 @@ export class UsersService {
 
     // Core identity
     if (dto.name !== undefined) $set.name = dto.name;
-    if (dto.email !== undefined) $set.email = dto.email;
-    if (dto.phoneNumber !== undefined) $set.phoneNumber = dto.phoneNumber;
 
     // Extended profile
     if (dto.bio !== undefined) $set.bio = dto.bio;
@@ -720,6 +769,189 @@ export class UsersService {
     await this.requireUser(userId);
     await this.assertActiveExams(ids);
     return this.writeTargetExams(userId, ids);
+  }
+
+  // ── Verified phone + onboarding ───────────────────────────────────────────
+
+  /**
+   * Stamp the caller's existing number as verified. Called after a successful OTP
+   * sign-in, which proves ownership of that number. Idempotent and a no-op for
+   * accounts that have no number or are already stamped.
+   */
+  async markPhoneVerified(userId: string): Promise<void> {
+    await this.userModel
+      .updateOne(
+        {
+          _id: new Types.ObjectId(userId),
+          phoneNumber: { $type: 'string' },
+          phoneVerifiedAt: { $exists: false },
+        },
+        { $set: { phoneVerifiedAt: new Date() } },
+      )
+      .exec();
+  }
+
+  /**
+   * Attach a number whose ownership was just proven by an OTP.
+   *
+   * - Same number already verified on this account: success, nothing changes.
+   * - A different verified number is already on the account: 409.
+   * - Another account owns the number: 409 (also enforced by the unique index,
+   *   which covers two requests racing).
+   * - An old, unverified number on this account is replaced.
+   */
+  async setVerifiedPhone(
+    userId: string,
+    phoneNumber: string,
+  ): Promise<UserResponseDto> {
+    const user = await this.userModel.findById(userId).exec();
+    if (!user || user.isDeleted || !user.isActive) {
+      throw new NotFoundException(`User with ID "${userId}" not found`);
+    }
+
+    const sameNumber = user.phoneNumber === phoneNumber;
+    if (user.phoneVerifiedAt && user.phoneNumber && !sameNumber) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'PHONE_ALREADY_SET',
+        message: 'This account already has a verified mobile number.',
+      });
+    }
+
+    const phoneInUse = () =>
+      new ConflictException({
+        statusCode: 409,
+        error: 'PHONE_IN_USE',
+        message:
+          'This mobile number is already linked to another account. Sign in with that number instead.',
+      });
+
+    const owner = await this.userModel
+      .findOne({ phoneNumber, _id: { $ne: user._id } })
+      .select('_id')
+      .lean()
+      .exec();
+    if (owner) {
+      throw phoneInUse();
+    }
+
+    if (!(sameNumber && user.phoneVerifiedAt)) {
+      try {
+        await this.userModel
+          .updateOne(
+            { _id: user._id },
+            { $set: { phoneNumber, phoneVerifiedAt: new Date() } },
+          )
+          .exec();
+      } catch (error) {
+        if ((error as { code?: number })?.code === 11000) {
+          throw phoneInUse();
+        }
+        throw error;
+      }
+    }
+
+    return this.findOne(userId);
+  }
+
+  /**
+   * Attach an email whose ownership was just proven by an email OTP.
+   *
+   * - Only accounts without a real email (none, or the mobile-sign-up
+   *   placeholder) may add one. The same address again just marks it verified.
+   * - A different real email already on the account: 409.
+   * - Another account owns the address: 409 (also enforced by the unique index,
+   *   which covers two requests racing).
+   */
+  async setVerifiedEmail(
+    userId: string,
+    email: string,
+  ): Promise<UserResponseDto> {
+    const user = await this.userModel.findById(userId).exec();
+    if (!user || user.isDeleted || !user.isActive) {
+      throw new NotFoundException(`User with ID "${userId}" not found`);
+    }
+
+    const normalized = email.trim().toLowerCase();
+    const hasRealEmail = Boolean(user.email) && !isPlaceholderEmail(user.email);
+    if (hasRealEmail && user.email.toLowerCase() !== normalized) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'EMAIL_ALREADY_SET',
+        message: 'This account already has an email address.',
+      });
+    }
+
+    const emailInUse = () =>
+      new ConflictException({
+        statusCode: 409,
+        error: 'EMAIL_IN_USE',
+        message: 'This email belongs to another ExamFlex account.',
+      });
+
+    const owner = await this.userModel
+      .findOne({ email: normalized, _id: { $ne: user._id } })
+      .select('_id')
+      .lean()
+      .exec();
+    if (owner) {
+      throw emailInUse();
+    }
+
+    try {
+      await this.userModel
+        .updateOne(
+          { _id: user._id },
+          { $set: { email: normalized, emailVerifiedAt: new Date() } },
+        )
+        .exec();
+    } catch (error) {
+      if ((error as { code?: number })?.code === 11000) {
+        throw emailInUse();
+      }
+      throw error;
+    }
+
+    return this.findOne(userId);
+  }
+
+  /**
+   * Finish the mandatory first-run step: name + one target exam. Requires a
+   * verified number, so the gate cannot be passed without the OTP.
+   */
+  async completeOnboarding(
+    userId: string,
+    input: { name: string; targetExamId: string },
+  ): Promise<UserResponseDto> {
+    const user = await this.userModel.findById(userId).exec();
+    if (!user || user.isDeleted || !user.isActive) {
+      throw new NotFoundException(`User with ID "${userId}" not found`);
+    }
+    if (!user.phoneNumber || !user.phoneVerifiedAt) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        error: 'PHONE_NOT_VERIFIED',
+        message: 'Verify your mobile number before continuing.',
+      });
+    }
+
+    // First-run only. A learner who already finished (a retry after a lost
+    // response, or a direct API call) must not have their exam list replaced.
+    if (user.onboardingCompletedAt) {
+      return this.findOne(userId);
+    }
+
+    // Validates the id and that the exam exists and is active.
+    await this.setTargetExams(userId, [input.targetExamId]);
+
+    await this.userModel
+      .updateOne(
+        { _id: user._id },
+        { $set: { name: input.name, onboardingCompletedAt: new Date() } },
+      )
+      .exec();
+
+    return this.findOne(userId);
   }
 
   async addTargetExam(
@@ -954,6 +1186,22 @@ export class UsersService {
       const diff = (obj.targetExamDate as Date).getTime() - now.getTime();
       obj.targetExamRemainingDays = Math.max(0, Math.ceil(diff / 86_400_000));
     }
+
+    // Verification / onboarding state. Admins never go through onboarding.
+    const phoneVerified = Boolean(obj.phoneNumber && obj.phoneVerifiedAt);
+    const onboardingCompleted = Boolean(obj.onboardingCompletedAt);
+    obj.phoneVerified = phoneVerified;
+    obj.onboardingCompleted = onboardingCompleted;
+    obj.profileComplete =
+      obj.role === UserRole.ADMIN || (phoneVerified && onboardingCompleted);
+    // Google only shares verified addresses, so a linked Google account counts.
+    obj.emailVerified =
+      typeof obj.email === 'string' &&
+      !isPlaceholderEmail(obj.email) &&
+      Boolean(obj.emailVerifiedAt || obj.googleSub);
+    delete obj.phoneVerifiedAt;
+    delete obj.emailVerifiedAt;
+    delete obj.onboardingCompletedAt;
 
     // Never leak password hashes, the Google subject, checkout billing,
     // or the prompt-dismissal counters.

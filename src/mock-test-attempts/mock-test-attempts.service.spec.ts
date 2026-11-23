@@ -571,6 +571,120 @@ describe('MockTestAttemptsService', () => {
     });
   });
 
+  describe('question and option images', () => {
+    const imageOf = (key: string) => ({
+      key,
+      bucket: 'examflex-images',
+      region: 'ap-south-1',
+    });
+
+    // Behaves like the real resolver: one signed URL per image, null for none.
+    const signLikeResolver = async (
+      images: Array<{ key?: string } | null | undefined>,
+    ) =>
+      images.map(image =>
+        image?.key
+          ? `https://examflex-images.s3.ap-south-1.amazonaws.com/${image.key}?X-Amz-Signature=sig`
+          : null,
+      );
+
+    it('puts each signed URL on the right question and option in the start payload', async () => {
+      mockTestModel.findById.mockReturnValue(chainable(makeTest()));
+      attemptModel.findOne.mockReturnValue(chainable(null));
+      attemptModel.create.mockImplementation(async (doc: any) =>
+        makeAttempt({ questions: doc.questions }),
+      );
+      const withImages = {
+        ...questionDoc(Q1),
+        questionText: {
+          en: { text: 'See figure', image: imageOf('admin-images/q1.png') },
+          ml: { text: null, image: null },
+        },
+        optionType: 'image',
+        options: [
+          {
+            id: 'a',
+            type: 'image',
+            en: null,
+            ml: null,
+            image: imageOf('admin-images/q1-a.png'),
+          },
+          {
+            id: 'b',
+            type: 'image',
+            en: null,
+            ml: null,
+            image: imageOf('admin-images/q1-b.png'),
+          },
+        ],
+      };
+      const second = {
+        ...questionDoc(Q2),
+        options: [
+          { id: 'a', type: 'text', en: 'Plain', ml: null, image: null },
+          {
+            id: 'b',
+            type: 'text',
+            en: 'Mixed',
+            ml: null,
+            image: imageOf('admin-images/q2-b.png'),
+          },
+        ],
+      };
+      questionModel.find.mockReturnValue(chainable([second, withImages]));
+      imageUrlResolver.resolveMany.mockImplementation(signLikeResolver);
+
+      const result = await service.startAttempt(
+        { mockTestId: TEST_ID },
+        USER_ID,
+      );
+
+      const base =
+        'https://examflex-images.s3.ap-south-1.amazonaws.com/admin-images';
+      const [first, other] = result.questions;
+      expect(first._id).toBe(Q1);
+      expect(first.questionText.en.imageUrl).toBe(
+        `${base}/q1.png?X-Amz-Signature=sig`,
+      );
+      expect(first.questionText.ml.imageUrl).toBeNull();
+      expect(first.optionType).toBe('image');
+      expect(first.options.map(o => [o.id, o.type, o.imageUrl])).toEqual([
+        ['a', 'image', `${base}/q1-a.png?X-Amz-Signature=sig`],
+        ['b', 'image', `${base}/q1-b.png?X-Amz-Signature=sig`],
+      ]);
+      // the second question has no stem picture, and only option b has one
+      expect(other._id).toBe(Q2);
+      expect(other.questionText.en.imageUrl).toBeNull();
+      expect(other.options.map(o => o.imageUrl)).toEqual([
+        null,
+        `${base}/q2-b.png?X-Amz-Signature=sig`,
+      ]);
+      // raw bucket / key metadata never leaves the API
+      expect(JSON.stringify(result.questions)).not.toContain('"bucket"');
+    });
+
+    it('sends null (not an error) when a question has no picture', async () => {
+      mockTestModel.findById.mockReturnValue(chainable(makeTest()));
+      attemptModel.findOne.mockReturnValue(chainable(null));
+      attemptModel.create.mockImplementation(async (doc: any) =>
+        makeAttempt({ questions: doc.questions }),
+      );
+      questionModel.find.mockReturnValue(
+        chainable([questionDoc(Q1), questionDoc(Q2)]),
+      );
+      imageUrlResolver.resolveMany.mockImplementation(signLikeResolver);
+
+      const result = await service.startAttempt(
+        { mockTestId: TEST_ID },
+        USER_ID,
+      );
+      for (const question of result.questions) {
+        expect(question.questionText.en.imageUrl).toBeNull();
+        expect(question.options.every(o => o.imageUrl === null)).toBe(true);
+      }
+    });
+  });
+
   describe('pauseAttempt', () => {
     it('should reject invalid attempt ids', async () => {
       await expect(service.pauseAttempt('bad', USER_ID)).rejects.toThrow(
@@ -655,6 +769,40 @@ describe('MockTestAttemptsService', () => {
       );
     });
 
+    it('exposes the paper id so the results page can deep-link to the Mistake Book', async () => {
+      // populated reference (as findOne loads it)
+      attemptModel.findOne.mockReturnValue(
+        chainable(
+          makeAttempt({
+            mockTest: {
+              _id: new Types.ObjectId(TEST_ID),
+              paperType: 'TOPIC_WISE',
+            },
+          }),
+        ),
+      );
+      questionModel.find.mockReturnValue(chainable([questionDoc(Q1)]));
+      expect((await service.findOne(ATTEMPT_ID, USER_ID)).test.mockTestId).toBe(
+        TEST_ID,
+      );
+
+      // plain ObjectId reference
+      attemptModel.findOne.mockReturnValue(
+        chainable(makeAttempt({ mockTest: new Types.ObjectId(TEST_ID) })),
+      );
+      expect((await service.findOne(ATTEMPT_ID, USER_ID)).test.mockTestId).toBe(
+        TEST_ID,
+      );
+
+      // nothing to point at -> field omitted, no error
+      attemptModel.findOne.mockReturnValue(
+        chainable(makeAttempt({ mockTest: null })),
+      );
+      expect(
+        (await service.findOne(ATTEMPT_ID, USER_ID)).test.mockTestId,
+      ).toBeUndefined();
+    });
+
     it('should return in-progress details with remaining time', async () => {
       attemptModel.findOne.mockReturnValue(chainable(makeAttempt()));
       questionModel.find.mockReturnValue(chainable([questionDoc(Q1)]));
@@ -700,6 +848,28 @@ describe('MockTestAttemptsService', () => {
       expect(result.incorrectAnswers).toBe(1);
       expect(result.unansweredQuestions).toBe(1);
       expect(result.isPassed).toBe(true);
+    });
+
+    it('returns the subject id and, when populated, its name', async () => {
+      attemptModel.findOne.mockReturnValue(chainable(makeAttempt()));
+      questionModel.find.mockReturnValue(
+        chainable([
+          {
+            ...questionDoc(Q1),
+            subject: { _id: { toString: () => SUB_ID }, name: 'Physics' },
+          },
+          questionDoc(Q2),
+        ]),
+      );
+
+      const result = await service.findOne(ATTEMPT_ID, USER_ID);
+      const [first, second] = result.questions as unknown as Array<{
+        subject: string;
+        subjectName?: string;
+      }>;
+      expect(first).toMatchObject({ subject: SUB_ID, subjectName: 'Physics' });
+      expect(second.subject).toBe(SUB_ID);
+      expect(second.subjectName).toBeUndefined();
     });
 
     it('omits topic and uses paused elapsed time', async () => {

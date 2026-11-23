@@ -81,20 +81,23 @@ export class CreateRecommendationOfferingDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   description?: string;
 
-  @ApiProperty({
-    description: 'Minimum score percent (0–100) for this pathway',
+  @ApiPropertyOptional({
+    deprecated: true,
+    description:
+      'DEPRECATED and ignored by pathway calculations. Cut-offs are now entered per full mock (absolute marks). Still accepted and stored for backwards compatibility.',
     example: 75,
     minimum: 0,
     maximum: 100,
   })
+  @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(100)
-  minPercent: number;
+  minPercent?: number;
 
   @ApiPropertyOptional({
     description:
-      'Comfort threshold percent (0–100). Must be >= minPercent. Defaults to min + 10 when omitted.',
+      'DEPRECATED and ignored by pathway calculations. Must be >= minPercent when both are sent.',
     example: 85,
     minimum: 0,
     maximum: 100,

@@ -1,6 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PaperType } from '../../common/enums/paper-type.enum';
 import { PaginationMetaDto } from '../../common/dto/api-response.dto';
+import {
+  CITATION_STATUSES,
+  CitationStatus,
+} from '../../mock-test-attempts/schemas/question.schema';
 import { MistakeKind, MistakeTripReason } from '../mistake-book.constants';
 
 export class MistakeBookSessionDto {
@@ -150,6 +154,31 @@ export class MistakeBookSessionsResponseDto {
   }
 }
 
+/** The NCERT passage shown with a mistake (rank-1 citation, student fields only). */
+export class MistakeBookCitationDto {
+  @ApiPropertyOptional()
+  title?: string;
+
+  @ApiPropertyOptional({ description: 'Full chunk text (Mathpix markdown)' })
+  content?: string;
+
+  @ApiPropertyOptional({ type: [String] })
+  images?: string[];
+
+  @ApiPropertyOptional({ example: 'The d - and f -Block Elements' })
+  chapterName?: string;
+
+  @ApiPropertyOptional({ example: 'XII' })
+  grade?: string;
+
+  @ApiPropertyOptional({ description: 'Printed NCERT page number' })
+  pageNumber?: number;
+
+  constructor(partial: Partial<MistakeBookCitationDto>) {
+    Object.assign(this, partial);
+  }
+}
+
 export class MistakeBookEntryDto {
   @ApiProperty()
   id: string;
@@ -227,6 +256,20 @@ export class MistakeBookEntryDto {
 
   @ApiProperty({ enum: ['concept-gap', 'calculation', 'time'] })
   tripReason: MistakeTripReason;
+
+  @ApiPropertyOptional({
+    enum: CITATION_STATUSES,
+    nullable: true,
+    description: 'NCERT citation lookup status; null when never run',
+  })
+  citationStatus: CitationStatus | null;
+
+  @ApiProperty({
+    type: [MistakeBookCitationDto],
+    description:
+      'At most one item: the rank-1 NCERT citation. Empty when none.',
+  })
+  citations: MistakeBookCitationDto[];
 
   constructor(partial: Partial<MistakeBookEntryDto>) {
     Object.assign(this, partial);

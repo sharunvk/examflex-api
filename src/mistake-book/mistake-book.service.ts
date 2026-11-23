@@ -15,6 +15,7 @@ import {
 } from '../mock-test-attempts/schemas/mock-test-attempt.schema';
 import {
   Question,
+  QuestionCitation,
   QuestionDocument,
 } from '../mock-test-attempts/schemas/question.schema';
 import {
@@ -25,6 +26,7 @@ import { Subject, SubjectDocument } from '../subjects/schemas/subject.schema';
 import { Topic, TopicDocument } from '../topics/schemas/topic.schema';
 import {
   MistakeBookChapterOptionDto,
+  MistakeBookCitationDto,
   MistakeBookEntryDto,
   MistakeBookFilterOptionDto,
   MistakeBookListSummaryDto,
@@ -797,6 +799,8 @@ export class MistakeBookService {
       sourceHref: '',
       sourceHint: SOURCE_HINT,
       tripReason: entry.tripReason,
+      citationStatus: question?.citationStatus ?? null,
+      citations: toTopCitation(question?.citations),
     });
   }
 
@@ -831,6 +835,33 @@ export class MistakeBookService {
     }
     return map;
   }
+}
+
+/**
+ * The rank-1 NCERT citation, trimmed to the fields students see. Internal
+ * fields (chunk id, scores, source file name, who selected it) never leave
+ * the API.
+ */
+function toTopCitation(
+  citations: QuestionCitation[] | undefined,
+): MistakeBookCitationDto[] {
+  const top = citations?.find(citation => citation.rank === 1);
+  if (!top) {
+    return [];
+  }
+  const images = (top.images ?? []).filter(
+    (url): url is string => typeof url === 'string' && url.trim() !== '',
+  );
+  return [
+    new MistakeBookCitationDto({
+      title: top.title,
+      content: top.content,
+      ...(images.length ? { images } : {}),
+      chapterName: top.chapterName,
+      grade: top.grade,
+      pageNumber: top.pageNumber,
+    }),
+  ];
 }
 
 /** Distinct ObjectIds preserving first-seen order. */

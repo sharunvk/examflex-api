@@ -561,5 +561,119 @@ describe('MistakeBookService', () => {
       expect(result.entries[0].prompt).toContain('Fig. shows');
       expect(result.entries[0].imageUrl).toBe('https://cdn.test/fig.png');
     });
+
+    function mockSessionWithQuestion(question: Record<string, unknown>) {
+      const entry = {
+        id: ENTRY_ID,
+        kind: 'incorrect',
+        question: new Types.ObjectId(Q1),
+        questionOrder: 1,
+        subject: new Types.ObjectId(SUBJECT_ID),
+        topic: undefined,
+        selectedOptionId: 'b',
+        tripReason: 'concept-gap',
+        attempt: new Types.ObjectId(ATTEMPT_ID),
+        attemptSubmittedAt: new Date('2026-11-17T10:00:00.000Z'),
+        mockTitle: 'Mock 12',
+        paperType: PaperType.FULL_EXAM,
+      };
+      entryModel.find
+        .mockReturnValueOnce(chain([entry]))
+        .mockReturnValueOnce(chain([entry]));
+      questionModel.find.mockReturnValue(
+        chain([
+          {
+            _id: new Types.ObjectId(Q1),
+            questionText: { en: { text: 'Which gas?' }, ml: { text: null } },
+            options: [
+              { id: 'a', type: 'text', en: 'A', ml: null },
+              { id: 'b', type: 'text', en: 'B', ml: null },
+            ],
+            correctAnswer: 'a',
+            explanation: { en: 'Because', ml: null },
+            ...question,
+          },
+        ]),
+      );
+      subjectModel.find.mockReturnValue(
+        chain([{ _id: new Types.ObjectId(SUBJECT_ID), name: 'Chemistry' }]),
+      );
+      imageUrlResolver.resolveMany.mockResolvedValue([null, null]);
+    }
+
+    it('returns only the rank-1 citation with student fields', async () => {
+      mockSessionWithQuestion({
+        citationStatus: 'done',
+        citations: [
+          {
+            chunkId: 'chunk-2',
+            rank: 2,
+            title: 'Redox',
+            content: 'Second',
+            selectedBy: 'auto',
+          },
+          {
+            chunkId: 'chunk-1',
+            rank: 1,
+            title: 'Potassium Dichromate',
+            content: 'Dichromate text',
+            chunkIndex: 31,
+            images: ['https://cdn.test/figure-7.jpg', ''],
+            sourceDoc: 'The_d_-_and_f_-Block_Elements.pdf',
+            chapterName: 'The d - and f -Block Elements',
+            documentType: 'study_material',
+            grade: 'XII',
+            pageStart: 17,
+            ncertPageOffset: 88,
+            pageNumber: 105,
+            score: 0.93,
+            similarity: 0.71,
+            selectedBy: 'auto',
+          },
+        ],
+      });
+
+      const result = await service.getSession(USER_ID, MOCK_ID);
+      const [entry] = result.entries;
+
+      expect(entry.citationStatus).toBe('done');
+      expect(entry.citations).toHaveLength(1);
+      expect({ ...entry.citations[0] }).toEqual({
+        title: 'Potassium Dichromate',
+        content: 'Dichromate text',
+        images: ['https://cdn.test/figure-7.jpg'],
+        chapterName: 'The d - and f -Block Elements',
+        grade: 'XII',
+        pageNumber: 105,
+      });
+    });
+
+    it('returns no citation when none has rank 1', async () => {
+      mockSessionWithQuestion({
+        citationStatus: 'done',
+        citations: [
+          {
+            chunkId: 'c',
+            rank: 2,
+            title: 'T',
+            content: 'C',
+            selectedBy: 'auto',
+          },
+        ],
+      });
+
+      const result = await service.getSession(USER_ID, MOCK_ID);
+
+      expect(result.entries[0].citations).toEqual([]);
+    });
+
+    it('returns null status and no citations for uncited questions', async () => {
+      mockSessionWithQuestion({});
+
+      const result = await service.getSession(USER_ID, MOCK_ID);
+
+      expect(result.entries[0].citationStatus).toBeNull();
+      expect(result.entries[0].citations).toEqual([]);
+    });
   });
 });

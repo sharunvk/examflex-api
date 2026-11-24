@@ -96,6 +96,26 @@ export function calculateAttemptTimeElapsed(
   return (attempt.timeConsumed || 0) + currentSessionTime;
 }
 
+/**
+ * True when an IN_PROGRESS attempt has run past its final timer (the paper, or
+ * the last section of a session-wise paper), i.e. it was abandoned and would be
+ * closed as EXPIRED by the next resume / GET. Earlier sections are left alone:
+ * the student can still continue with the next section.
+ */
+export function isAttemptOverdue(
+  attempt: AttemptSummarySource,
+  nowMs = Date.now(),
+): boolean {
+  if (attempt.status !== 'IN_PROGRESS') return false;
+  if (getCurrentSession(attempt)) {
+    const lastIndex = (attempt.sessions?.length ?? 1) - 1;
+    if ((attempt.currentSessionIndex ?? 0) < lastIndex) return false;
+  }
+  return (
+    calculateAttemptTimeElapsed(attempt, nowMs) > getAllowedTimeSeconds(attempt)
+  );
+}
+
 export function countAnswered(
   questions: AttemptSummaryQuestion[] = [],
 ): number {

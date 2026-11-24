@@ -7,6 +7,7 @@ import {
   calculateAttemptTimeElapsed,
   countAnswered,
   countCorrectIncorrect,
+  isAttemptOverdue,
 } from './attempt-summary';
 
 const TEST_ID = '507f1f77bcf86cd799439011';
@@ -30,6 +31,56 @@ function attempt(
 }
 
 describe('attempt-summary helpers', () => {
+  describe('isAttemptOverdue', () => {
+    const startedAt = new Date('2024-01-01T10:00:00.000Z');
+    const at = (seconds: number) => startedAt.getTime() + seconds * 1000;
+
+    it('flags an in-progress paper past its time', () => {
+      const row = attempt({ status: 'IN_PROGRESS', startedAt });
+      expect(isAttemptOverdue(row, at(600))).toBe(false);
+      expect(isAttemptOverdue(row, at(601))).toBe(true);
+    });
+
+    it('never flags paused or closed attempts', () => {
+      for (const status of ['PAUSED', 'SUBMITTED', 'EXPIRED']) {
+        expect(
+          isAttemptOverdue(
+            attempt({ status, startedAt, timeConsumed: 9999 }),
+            at(99_999),
+          ),
+        ).toBe(false);
+      }
+    });
+
+    it('only flags the last section of a session-wise paper', () => {
+      const sessions = [
+        { status: 'IN_PROGRESS', durationInMinutes: 1, startedAt },
+        { status: 'LOCKED', durationInMinutes: 1 },
+      ];
+      const first = attempt({
+        status: 'IN_PROGRESS',
+        startedAt,
+        isSessionWise: true,
+        currentSessionIndex: 0,
+        sessions,
+      });
+      expect(isAttemptOverdue(first, at(3600))).toBe(false);
+
+      const last = attempt({
+        status: 'IN_PROGRESS',
+        startedAt,
+        isSessionWise: true,
+        currentSessionIndex: 1,
+        sessions: [
+          { status: 'SUBMITTED', durationInMinutes: 1, timeConsumed: 60 },
+          { status: 'IN_PROGRESS', durationInMinutes: 1, startedAt },
+        ],
+      });
+      expect(isAttemptOverdue(last, at(60))).toBe(false);
+      expect(isAttemptOverdue(last, at(61))).toBe(true);
+    });
+  });
+
   describe('countAnswered / countCorrectIncorrect', () => {
     it('counts selected options and correct/incorrect flags', () => {
       const questions = [

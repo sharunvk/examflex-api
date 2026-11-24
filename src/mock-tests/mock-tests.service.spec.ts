@@ -14,6 +14,7 @@ import { UserAttemptAction } from '../common/enums/user-attempt-action.enum';
 import { CreateTopicWiseMockTestDto } from './dto/create-topic-wise-mock-test.dto';
 import { ImageUrlResolver } from '../aws/s3/image-url.resolver';
 import { MistakeBookService } from '../mistake-book/mistake-book.service';
+import { MockTestAttemptsService } from '../mock-test-attempts/mock-test-attempts.service';
 
 const TEST_ID = '507f1f77bcf86cd799439011';
 const EXAM_ID = '507f1f77bcf86cd799439012';
@@ -156,10 +157,15 @@ describe('MockTestsService', () => {
     ),
   };
 
+  const attemptsService = {
+    expireOverdueAttempts: jest.fn().mockResolvedValue(0),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MockTestsService,
+        { provide: MockTestAttemptsService, useValue: attemptsService },
         { provide: getModelToken(MockTest.name), useValue: mockTestModel },
         {
           provide: getModelToken(MockTestAttempt.name),
@@ -183,6 +189,8 @@ describe('MockTestsService', () => {
     mockTestModel.create.mockReset();
     mockTestModel.aggregate.mockReset();
     attemptModel.find.mockReset();
+    attemptsService.expireOverdueAttempts.mockReset();
+    attemptsService.expireOverdueAttempts.mockResolvedValue(0);
     topicModel.find.mockReset();
     questionModel.aggregate.mockReset();
     imageUrlResolver.resolveMany.mockReset();
@@ -859,6 +867,92 @@ describe('MockTestsService', () => {
         bestScore: 8,
         lastAttemptId: ATTEMPT_ID,
         lastIncorrectAnswers: 1,
+      });
+    });
+
+    describe('abandoned attempts', () => {
+      const overdueRow = () => ({
+        _id: { toString: () => ATTEMPT_ID },
+        mockTest: { toString: () => TEST_ID },
+        status: 'IN_PROGRESS',
+        // Started 3h ago on a 10 min paper and never paused.
+        startedAt: new Date(Date.now() - 3 * 60 * 60 * 1000),
+        durationInMinutes: 10,
+        timeConsumed: 0,
+        questions: [{ selectedOption: 'a' }, {}],
+      });
+
+      it('expires overdue attempts and offers Retry instead of Resume', async () => {
+        attemptModel.find
+          .mockReturnValueOnce(chainable([overdueRow()]))
+          .mockReturnValueOnce(
+            chainable([
+              {
+                ...overdueRow(),
+                status: 'EXPIRED',
+                score: 4,
+                timeConsumed: 600,
+                submittedAt: new Date(),
+                questions: [{ selectedOption: 'a', isCorrect: true }, {}],
+              },
+            ]),
+          );
+        attemptsService.expireOverdueAttempts.mockResolvedValue(1);
+
+        const map = await service.getUserAttemptActions([TEST_ID], USER_ID);
+
+        expect(attemptsService.expireOverdueAttempts).toHaveBeenCalledWith(
+          USER_ID,
+          [ATTEMPT_ID],
+        );
+        expect(attemptModel.find).toHaveBeenCalledTimes(2);
+        expect(map.get(TEST_ID)?.action).toBe(UserAttemptAction.RETAKE);
+        expect(map.get(TEST_ID)?.resumeAttemptId).toBeUndefined();
+        expect(map.get(TEST_ID)?.attemptSummary).toMatchObject({
+          status: 'COMPLETED',
+          attemptCount: 1,
+          lastAttemptId: ATTEMPT_ID,
+        });
+      });
+
+      it('leaves live and paused attempts alone', async () => {
+        attemptModel.find.mockReturnValue(
+          chainable([
+            {
+              ...overdueRow(),
+              startedAt: new Date(Date.now() - 60_000),
+            },
+            {
+              ...overdueRow(),
+              _id: { toString: () => Q1 },
+              mockTest: { toString: () => EXAM_ID },
+              status: 'PAUSED',
+              timeConsumed: 120,
+            },
+          ]),
+        );
+
+        const map = await service.getUserAttemptActions(
+          [TEST_ID, EXAM_ID],
+          USER_ID,
+        );
+
+        expect(attemptsService.expireOverdueAttempts).not.toHaveBeenCalled();
+        expect(attemptModel.find).toHaveBeenCalledTimes(1);
+        expect(map.get(TEST_ID)?.action).toBe(UserAttemptAction.RESUME);
+        expect(map.get(EXAM_ID)?.action).toBe(UserAttemptAction.RESUME);
+      });
+
+      it('keeps the old summary when the sweep fails', async () => {
+        attemptModel.find.mockReturnValue(chainable([overdueRow()]));
+        attemptsService.expireOverdueAttempts.mockRejectedValue(
+          new Error('db down'),
+        );
+
+        const map = await service.getUserAttemptActions([TEST_ID], USER_ID);
+
+        expect(attemptModel.find).toHaveBeenCalledTimes(1);
+        expect(map.get(TEST_ID)?.action).toBe(UserAttemptAction.RESUME);
       });
     });
 

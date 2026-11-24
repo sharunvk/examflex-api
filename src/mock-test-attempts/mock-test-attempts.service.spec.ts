@@ -19,6 +19,7 @@ import { AccessDecisionReason } from '../common/enums/access-decision-reason.enu
 import { AccessMode } from '../common/enums/access-mode.enum';
 import { MistakeBookService } from '../mistake-book/mistake-book.service';
 import { TodayService } from '../today/today.service';
+import { AttemptErrorCode } from '../common/enums/attempt-error-code.enum';
 
 const TEST_ID = '507f1f77bcf86cd799439011';
 const USER_ID = '507f1f77bcf86cd799439012';
@@ -28,6 +29,17 @@ const Q2 = '507f1f77bcf86cd799439015';
 const EXAM_ID = '507f1f77bcf86cd799439016';
 const SUB_ID = '507f1f77bcf86cd799439017';
 const TOP_ID = '507f1f77bcf86cd799439018';
+
+/** `details.code` from a thrown Nest HttpException with an object body. */
+async function errorCodeOf(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    const body = (error as { getResponse?: () => unknown }).getResponse?.();
+    return (body as { details?: { code?: unknown } })?.details?.code;
+  }
+  throw new Error('expected the call to throw');
+}
 
 function chainable(resolved: unknown) {
   const query: any = {};
@@ -232,7 +244,7 @@ describe('MockTestAttemptsService', () => {
     });
     mistakeBookService.replaceForAttempt.mockResolvedValue(undefined);
     attemptModel.updateOne.mockReturnValue({
-      exec: jest.fn().mockResolvedValue({}),
+      exec: jest.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
     });
   });
 
@@ -377,6 +389,81 @@ describe('MockTestAttemptsService', () => {
       await expect(
         service.startAttempt({ mockTestId: TEST_ID }, USER_ID),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('tags a no-retake conflict with RETAKE_NOT_ALLOWED once submitted', async () => {
+      mockTestModel.findById.mockReturnValue(
+        chainable(makeTest({ allowRetake: false })),
+      );
+      attemptModel.findOne.mockReturnValue(
+        chainable(makeAttempt({ status: 'SUBMITTED' })),
+      );
+
+      await expect(
+        errorCodeOf(service.startAttempt({ mockTestId: TEST_ID }, USER_ID)),
+      ).resolves.toBe(AttemptErrorCode.RETAKE_NOT_ALLOWED);
+    });
+
+    it('counts a paused attempt as taken on a no-retake paper', async () => {
+      mockTestModel.findById.mockReturnValue(
+        chainable(makeTest({ allowRetake: false })),
+      );
+      attemptModel.findOne.mockReturnValue(
+        chainable(makeAttempt({ status: 'PAUSED' })),
+      );
+
+      await expect(
+        errorCodeOf(service.startAttempt({ mockTestId: TEST_ID }, USER_ID)),
+      ).resolves.toBe(AttemptErrorCode.ATTEMPT_ALREADY_ACTIVE);
+      expect(attemptModel.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: { $in: ['SUBMITTED', 'EXPIRED', 'IN_PROGRESS', 'PAUSED'] },
+        }),
+      );
+    });
+
+    it('blocks a retake after an expired attempt on a no-retake paper', async () => {
+      mockTestModel.findById.mockReturnValue(
+        chainable(makeTest({ allowRetake: false })),
+      );
+      attemptModel.findOne.mockReturnValue(
+        chainable(makeAttempt({ status: 'EXPIRED' })),
+      );
+
+      await expect(
+        errorCodeOf(service.startAttempt({ mockTestId: TEST_ID }, USER_ID)),
+      ).resolves.toBe(AttemptErrorCode.RETAKE_NOT_ALLOWED);
+      expect(attemptModel.create).not.toHaveBeenCalled();
+    });
+
+    it('blocks a new start while an attempt is paused', async () => {
+      mockTestModel.findById.mockReturnValue(chainable(makeTest()));
+      const paused = makeAttempt({
+        status: 'PAUSED',
+        // Paused long ago: paused attempts never expire.
+        startedAt: new Date(Date.now() - 20 * 60 * 1000),
+        timeConsumed: 60,
+      });
+      attemptModel.findOne.mockReturnValue(chainable(paused));
+
+      await expect(
+        errorCodeOf(service.startAttempt({ mockTestId: TEST_ID }, USER_ID)),
+      ).resolves.toBe(AttemptErrorCode.ATTEMPT_ALREADY_ACTIVE);
+      expect(attemptModel.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ status: { $in: ['IN_PROGRESS', 'PAUSED'] } }),
+      );
+      expect(paused.status).toBe('PAUSED');
+      expect(paused.save).not.toHaveBeenCalled();
+      expect(attemptModel.create).not.toHaveBeenCalled();
+    });
+
+    it('tags an active in-progress conflict with ATTEMPT_ALREADY_ACTIVE', async () => {
+      mockTestModel.findById.mockReturnValue(chainable(makeTest()));
+      attemptModel.findOne.mockReturnValue(chainable(makeAttempt()));
+
+      await expect(
+        errorCodeOf(service.startAttempt({ mockTestId: TEST_ID }, USER_ID)),
+      ).resolves.toBe(AttemptErrorCode.ATTEMPT_ALREADY_ACTIVE);
     });
 
     it('should start a topic-wise attempt', async () => {
@@ -566,7 +653,10 @@ describe('MockTestAttemptsService', () => {
         USER_ID,
       );
       expect(expired.status).toBe('EXPIRED');
-      expect(expired.save).toHaveBeenCalled();
+      expect(attemptModel.updateOne).toHaveBeenCalledWith(
+        { _id: expired._id, status: 'IN_PROGRESS' },
+        { $set: expect.objectContaining({ status: 'EXPIRED' }) },
+      );
       expect(result.attemptId).toBe(ATTEMPT_ID);
     });
   });
@@ -910,6 +1000,35 @@ describe('MockTestAttemptsService', () => {
       );
     });
 
+    it('tags an attempt that just ran out of time with ATTEMPT_EXPIRED', async () => {
+      const attempt = makeAttempt({
+        startedAt: new Date(Date.now() - 20 * 60 * 1000),
+        durationInMinutes: 1,
+      });
+      attemptModel.findOne.mockReturnValue(chainable(attempt));
+      questionModel.find.mockReturnValue(chainable([questionDoc()]));
+
+      await expect(
+        errorCodeOf(service.resumeAttempt(ATTEMPT_ID, USER_ID)),
+      ).resolves.toBe(AttemptErrorCode.ATTEMPT_EXPIRED);
+    });
+
+    it('tags already closed attempts by status', async () => {
+      attemptModel.findOne.mockReturnValue(
+        chainable(makeAttempt({ status: 'EXPIRED' })),
+      );
+      await expect(
+        errorCodeOf(service.resumeAttempt(ATTEMPT_ID, USER_ID)),
+      ).resolves.toBe(AttemptErrorCode.ATTEMPT_EXPIRED);
+
+      attemptModel.findOne.mockReturnValue(
+        chainable(makeAttempt({ status: 'SUBMITTED' })),
+      );
+      await expect(
+        errorCodeOf(service.resumeAttempt(ATTEMPT_ID, USER_ID)),
+      ).resolves.toBe(AttemptErrorCode.ATTEMPT_CLOSED);
+    });
+
     it('should resume a paused attempt', async () => {
       const attempt = makeAttempt({
         status: 'PAUSED',
@@ -1013,6 +1132,85 @@ describe('MockTestAttemptsService', () => {
       await expect(service.resumeAttempt(ATTEMPT_ID, USER_ID)).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('expireOverdueAttempts', () => {
+    it('scores and closes abandoned attempts, leaving live ones alone', async () => {
+      const overdue = makeAttempt({
+        startedAt: new Date(Date.now() - 3 * 60 * 60 * 1000),
+        durationInMinutes: 1,
+      });
+      const live = makeAttempt();
+      attemptModel.find.mockReturnValue(chainable([overdue, live]));
+      questionModel.find.mockReturnValue(chainable([questionDoc(Q1)]));
+
+      const expired = await service.expireOverdueAttempts(USER_ID, [
+        ATTEMPT_ID,
+        '507f1f77bcf86cd799439099',
+      ]);
+
+      expect(expired).toBe(1);
+      expect(attemptModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'IN_PROGRESS' }),
+      );
+      // Snapshot before expiry is kept as a scored attempt.
+      expect(overdue.status).toBe('EXPIRED');
+      expect(overdue.score).toBe(1);
+      expect(overdue.timeConsumed).toBe(60);
+      expect(overdue.submittedAt).toBeInstanceOf(Date);
+      // Closed with one conditional write that carries the scored snapshot.
+      expect(attemptModel.updateOne).toHaveBeenCalledTimes(1);
+      expect(attemptModel.updateOne).toHaveBeenCalledWith(
+        { _id: overdue._id, status: 'IN_PROGRESS' },
+        {
+          $set: expect.objectContaining({
+            status: 'EXPIRED',
+            score: 1,
+            timeConsumed: 60,
+            submittedAt: expect.any(Date),
+            questions: overdue.questions,
+          }),
+        },
+      );
+      expect(overdue.save).not.toHaveBeenCalled();
+      expect(mistakeBookService.replaceForAttempt).toHaveBeenCalledWith(
+        ATTEMPT_ID,
+      );
+      expect(analyticsService.invalidateDashboardCache).toHaveBeenCalled();
+      expect(live.status).toBe('IN_PROGRESS');
+      expect(live.save).not.toHaveBeenCalled();
+    });
+
+    it('runs side effects only for the request that closes the attempt', async () => {
+      const overdue = makeAttempt({
+        startedAt: new Date(Date.now() - 3 * 60 * 60 * 1000),
+        durationInMinutes: 1,
+      });
+      attemptModel.find.mockReturnValue(chainable([overdue]));
+      questionModel.find.mockReturnValue(chainable([questionDoc(Q1)]));
+      // A concurrent list load / GET closed it between our read and write.
+      attemptModel.updateOne.mockReturnValue({
+        exec: jest
+          .fn()
+          .mockResolvedValue({ matchedCount: 0, modifiedCount: 0 }),
+      });
+
+      const expired = await service.expireOverdueAttempts(USER_ID, [
+        ATTEMPT_ID,
+      ]);
+
+      expect(expired).toBe(1);
+      expect(mistakeBookService.replaceForAttempt).not.toHaveBeenCalled();
+      expect(analyticsService.invalidateDashboardCache).not.toHaveBeenCalled();
+    });
+
+    it('does nothing without valid ids', async () => {
+      attemptModel.find.mockClear();
+      await expect(
+        service.expireOverdueAttempts(USER_ID, ['nope']),
+      ).resolves.toBe(0);
+      expect(attemptModel.find).not.toHaveBeenCalled();
     });
   });
 

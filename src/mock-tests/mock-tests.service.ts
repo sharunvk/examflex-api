@@ -3,8 +3,10 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Logger,
   forwardRef,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model, Types } from 'mongoose';
 import { MockTest, MockTestDocument } from './schemas/mock-test.schema';
@@ -44,7 +46,9 @@ import {
   AttemptSummarySource,
   UserAttemptEnrichment,
   buildEnrichmentsForTests,
+  isAttemptOverdue,
 } from './attempt-summary';
+import { MockTestAttemptsService } from '../mock-test-attempts/mock-test-attempts.service';
 import { AttemptSummaryDto } from './dto/attempt-summary.dto';
 import { MistakeBookService } from '../mistake-book/mistake-book.service';
 
@@ -69,7 +73,10 @@ export class MockTestsService {
     private readonly accessControlService: AccessControlService,
     private readonly imageUrlResolver: ImageUrlResolver,
     private readonly mistakeBookService: MistakeBookService,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  private readonly logger = new Logger(MockTestsService.name);
 
   /**
    * Find all mock tests with pagination and search
@@ -917,18 +924,12 @@ export class MockTestsService {
     return this.calculateUserAttemptEnrichments(mockTestIds, userId);
   }
 
-  /**
-   * Batched enrichment for catalog cards: CTA action + attemptSummary (no question bank load).
-   */
-  private async calculateUserAttemptEnrichments(
+  /** Lean attempt fields for catalog card summaries, newest first. */
+  private async loadAttemptSummaries(
     mockTestIds: string[],
     userId: string,
-  ): Promise<Map<string, UserAttemptEnrichment>> {
-    if (!mockTestIds.length || !userId) {
-      return new Map();
-    }
-
-    const attempts = (await this.attemptModel
+  ): Promise<AttemptSummarySource[]> {
+    return (await this.attemptModel
       .find({
         user: new Types.ObjectId(userId),
         mockTest: { $in: mockTestIds.map(id => new Types.ObjectId(id)) },
@@ -953,6 +954,58 @@ export class MockTestsService {
       .sort({ createdAt: -1 })
       .lean()
       .exec()) as AttemptSummarySource[];
+  }
+
+  /**
+   * Expire overdue attempts through the attempts service so scoring, analytics
+   * and the Mistake Book stay identical to a resume / GET expiry. Resolved
+   * lazily: MockTestAttemptsModule imports this module, not the other way round.
+   * Never fails the list; a failed sweep just leaves the old summary.
+   */
+  private async expireOverdueAttempts(
+    userId: string,
+    attemptIds: string[],
+  ): Promise<number> {
+    try {
+      const attemptsService = this.moduleRef.get(MockTestAttemptsService, {
+        strict: false,
+      });
+      return await attemptsService.expireOverdueAttempts(userId, attemptIds);
+    } catch (error) {
+      this.logger.warn(
+        `Could not expire overdue attempts for user ${userId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * Batched enrichment for catalog cards: CTA action + attemptSummary (no question bank load).
+   */
+  private async calculateUserAttemptEnrichments(
+    mockTestIds: string[],
+    userId: string,
+  ): Promise<Map<string, UserAttemptEnrichment>> {
+    if (!mockTestIds.length || !userId) {
+      return new Map();
+    }
+
+    let attempts = await this.loadAttemptSummaries(mockTestIds, userId);
+
+    // Abandoned attempts (tab crashed / closed without pausing) stay
+    // IN_PROGRESS after their time runs out. Close them now so the card offers
+    // Retry + Review instead of a Resume that the server would reject.
+    const overdueIds = attempts
+      .filter(attempt => isAttemptOverdue(attempt))
+      .map(attempt => attempt._id.toString());
+    if (overdueIds.length) {
+      const expired = await this.expireOverdueAttempts(userId, overdueIds);
+      if (expired > 0) {
+        attempts = await this.loadAttemptSummaries(mockTestIds, userId);
+      }
+    }
 
     const enrichments = buildEnrichmentsForTests(mockTestIds, attempts);
     const remainingByMock =

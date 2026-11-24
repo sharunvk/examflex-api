@@ -37,6 +37,7 @@ import { AnalysisService } from '../analysis/analysis.service';
 import { mapPerformanceBands } from '../exams/performance-bands';
 import { AccessControlService } from '../access/access-control.service';
 import { AccessDecisionReason } from '../common/enums/access-decision-reason.enum';
+import { AttemptErrorCode } from '../common/enums/attempt-error-code.enum';
 import { MistakeBookService } from '../mistake-book/mistake-book.service';
 import { TodayService } from '../today/today.service';
 
@@ -416,11 +417,72 @@ export class MockTestAttemptsService {
     this.persistTotalTimeConsumed(attempt, timeElapsed);
     attempt.status = 'EXPIRED';
     attempt.submittedAt = new Date();
-    await attempt.save();
+
+    // Close atomically: only the request that still finds the attempt
+    // IN_PROGRESS writes the result and runs the side effects. A concurrent
+    // list load / GET / resume that raced us sees it already closed.
+    const closed = await this.attemptModel
+      .updateOne(
+        { _id: attempt._id, status: 'IN_PROGRESS' },
+        {
+          $set: {
+            status: attempt.status,
+            score: attempt.score,
+            submittedAt: attempt.submittedAt,
+            timeConsumed: attempt.timeConsumed,
+            questions: attempt.questions,
+            ...(attempt.isSessionWise && attempt.sessions
+              ? { sessions: attempt.sessions }
+              : {}),
+          },
+        },
+      )
+      .exec();
+
+    if (closed.matchedCount === 0) {
+      this.logger.log(
+        `Attempt ${attempt.id} was already closed by a concurrent request`,
+      );
+      return true;
+    }
+
     await this.refreshAnalytics(attempt.user.toString());
     await this.syncMistakeBook(attempt.id);
 
     return true;
+  }
+
+  /**
+   * Close abandoned attempts whose time ran out (tab crashed or closed without
+   * a pause). Each one is scored and stored as EXPIRED exactly like a resume or
+   * GET would, so catalog cards stop offering Resume on a dead attempt.
+   * Only IN_PROGRESS attempts are touched; PAUSED ones never expire.
+   * @returns How many attempts were closed.
+   */
+  async expireOverdueAttempts(
+    userId: string,
+    attemptIds: string[],
+  ): Promise<number> {
+    const ids = attemptIds.filter(id => Types.ObjectId.isValid(id));
+    if (!ids.length || !Types.ObjectId.isValid(userId)) {
+      return 0;
+    }
+
+    const attempts = await this.attemptModel
+      .find({
+        _id: { $in: ids.map(id => new Types.ObjectId(id)) },
+        user: new Types.ObjectId(userId),
+        status: 'IN_PROGRESS',
+      })
+      .exec();
+
+    let expired = 0;
+    for (const attempt of attempts) {
+      if (await this.autoExpireIfNeeded(attempt)) {
+        expired += 1;
+      }
+    }
+    return expired;
   }
 
   /**
@@ -484,35 +546,48 @@ export class MockTestAttemptsService {
         .findOne({
           user: new Types.ObjectId(userId),
           mockTest: new Types.ObjectId(mockTestId),
-          status: { $in: ['SUBMITTED', 'IN_PROGRESS'] },
+          status: { $in: ['SUBMITTED', 'EXPIRED', 'IN_PROGRESS', 'PAUSED'] },
         })
         .exec();
 
       if (existingAttempt) {
-        throw new ConflictException(
-          'You have already attempted this test. Retakes are not allowed.',
-        );
+        const finished =
+          existingAttempt.status === 'SUBMITTED' ||
+          existingAttempt.status === 'EXPIRED';
+        throw new ConflictException({
+          message:
+            'You have already attempted this test. Retakes are not allowed.',
+          details: {
+            code: finished
+              ? AttemptErrorCode.RETAKE_NOT_ALLOWED
+              : AttemptErrorCode.ATTEMPT_ALREADY_ACTIVE,
+          },
+        });
       }
     }
 
-    // Step 4: Check for existing IN_PROGRESS attempt and auto-expire if needed
-    const inProgressAttempt = await this.attemptModel
+    // Step 4: Block a second start while an attempt is active. A PAUSED
+    // attempt counts too (it never expires); an overdue IN_PROGRESS one is
+    // auto-expired first and then no longer blocks.
+    const activeAttempt = await this.attemptModel
       .findOne({
         user: new Types.ObjectId(userId),
         mockTest: new Types.ObjectId(mockTestId),
-        status: 'IN_PROGRESS',
+        status: { $in: ['IN_PROGRESS', 'PAUSED'] },
       })
       .exec();
 
-    if (inProgressAttempt) {
-      // Auto-expire if time exceeded
-      const wasExpired = await this.autoExpireIfNeeded(inProgressAttempt);
+    if (activeAttempt) {
+      // Auto-expire if time exceeded (no-op for PAUSED attempts)
+      const wasExpired = await this.autoExpireIfNeeded(activeAttempt);
 
       if (!wasExpired) {
         // Still active - block new attempt
-        throw new ConflictException(
-          'You already have an in-progress attempt for this test. Please complete or submit it first.',
-        );
+        throw new ConflictException({
+          message:
+            'You already have an in-progress attempt for this test. Please complete or submit it first.',
+          details: { code: AttemptErrorCode.ATTEMPT_ALREADY_ACTIVE },
+        });
       }
       // If expired, allow starting new attempt
     }
@@ -986,16 +1061,24 @@ export class MockTestAttemptsService {
     const wasExpired = await this.autoExpireIfNeeded(attempt);
 
     if (wasExpired) {
-      throw new BadRequestException(
-        'This attempt has expired due to time limit. Use GET /:id endpoint to view results.',
-      );
+      throw new BadRequestException({
+        message:
+          'This attempt has expired due to time limit. Use GET /:id endpoint to view results.',
+        details: { code: AttemptErrorCode.ATTEMPT_EXPIRED },
+      });
     }
 
     // Step 4: Only allow resuming IN_PROGRESS or PAUSED attempts
     if (attempt.status !== 'IN_PROGRESS' && attempt.status !== 'PAUSED') {
-      throw new BadRequestException(
-        `Cannot resume attempt with status "${attempt.status}". Use GET /:id endpoint to view results.`,
-      );
+      throw new BadRequestException({
+        message: `Cannot resume attempt with status "${attempt.status}". Use GET /:id endpoint to view results.`,
+        details: {
+          code:
+            attempt.status === 'EXPIRED'
+              ? AttemptErrorCode.ATTEMPT_EXPIRED
+              : AttemptErrorCode.ATTEMPT_CLOSED,
+        },
+      });
     }
 
     // Step 4.5: If resuming from PAUSED, update status and startedAt
